@@ -6,6 +6,8 @@ Anatomy-Decoupled Aggregation strategy for federated liver CT segmentation acros
 
 ## Architecture
 
+![FedMed System Architecture](docs/architecture.png)
+
 - **Model**: MONAI SegResNet + MorphologicalDescriptor + SegmentFeatureFusion (~1.2M params)
 - **FL Framework**: [Flower](https://flower.ai/) (gRPC server–client)
 - **Aggregation**: FedMorph — 4 parameter groups, each with a tailored strategy:
