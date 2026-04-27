@@ -1,0 +1,67 @@
+# ══════════════════════════════════════════════════════════════════
+# FedMorph — Liver Segmentation Federated Learning Configuration
+# ══════════════════════════════════════════════════════════════════
+
+# ------------------------------------------------------------------
+# Server Configuration
+# ------------------------------------------------------------------
+# Server binds to 0.0.0.0 so all network interfaces accept connections.
+# Clients should connect to the server's actual IP (e.g. 192.168.1.100:9000).
+server_address: "0.0.0.0:9000"
+fl_rounds: 50
+min_clients: 3
+local_epochs: 10
+
+# ------------------------------------------------------------------
+# FL Method  (FedAvg | FedProx | FedBN | FedMorph)
+# ------------------------------------------------------------------
+method: "FedMorph"
+fedprox_mu: 0.01          # only used when method = FedProx
+
+# ------------------------------------------------------------------
+# Training Hyperparameters
+# ------------------------------------------------------------------
+batch_size: 1
+learning_rate: 3.0e-4
+weight_decay: 1.0e-4
+cls_coeff: 0.0            # classification loss weight (no cirrhosis labels)
+morph_coeff: 0.05         # morphological consistency loss weight
+seg_warmup_epochs: 30     # epochs before enabling cls / morph loss
+seed: 42
+
+# Windows: keep num_workers=0 to avoid multiprocessing issues.
+# Linux:   can increase to 2-4 if RAM allows.
+num_workers: 0
+
+# ------------------------------------------------------------------
+# Model (SegResNetWithCirrhosis)
+# ------------------------------------------------------------------
+num_classes: 9             # 9 liver segments
+init_filters: 8
+blocks_down: [1, 2, 2, 4]
+blocks_up: [1, 1, 1]
+
+# ------------------------------------------------------------------
+# Volume Preprocessing
+# ------------------------------------------------------------------
+image_size: 128
+volume_depth: 64
+
+# ------------------------------------------------------------------
+# Data Paths
+# ------------------------------------------------------------------
+# These paths are the DEFAULTS.  Override per-machine via:
+#   - command-line args:  --data-dir / --client-data-dir
+#   - env vars:           FEDMORPH_DATA_DIR / FEDMORPH_CLIENT_DATA_DIR
+#
+# data_dir       : directory containing patient folders (each with image.npy, mask.npy)
+# client_data_dir: directory containing client_N_patients.json
+#                  (created by prepare_client_data.py)
+#
+# === Linux (server / development) ===
+data_dir: "/data/jin/data/combined"
+client_data_dir: "/data/jin/FedFace/fl_clients"
+#
+# === Windows (client PC) examples ===
+# data_dir: "D:\\data\\combined"
+# client_data_dir: "D:\\data\\fl_clients"

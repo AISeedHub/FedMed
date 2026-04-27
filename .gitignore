@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Data & weights
+*.npy
+*.pth
+*.pt
+fl_clients/
+weights/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uv
+uv.lock
