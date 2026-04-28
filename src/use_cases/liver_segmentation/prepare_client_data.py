@@ -5,14 +5,17 @@ Prepare client data assignments for federated learning.
 Splits the full patient list into per-client subsets and writes JSON files
 that each client reads at startup.
 
+Patients are auto-detected by scanning the data directory for folders
+that contain both ``image.npy`` and ``mask.npy``.
+
 Run this ONCE on the machine that has the full dataset, then distribute
 the output ``fl_clients/`` folder to every client PC.
 
 Usage:
   python prepare_client_data.py \\
-      --patient-json /data/jin/data/combined/patient.json \\
+      --data-dir /path/to/combined \\
       --n-clients 3 \\
-      --output-dir /data/jin/FedFace/fl_clients
+      --output-dir fl_clients
 """
 
 import argparse
@@ -21,20 +24,33 @@ import os
 import random
 
 
+def discover_patients(data_dir: str) -> list[str]:
+    """Scan data_dir for patient folders containing image.npy + mask.npy."""
+    pids = []
+    for name in sorted(os.listdir(data_dir)):
+        patient_dir = os.path.join(data_dir, name)
+        if not os.path.isdir(patient_dir):
+            continue
+        if (
+            os.path.isfile(os.path.join(patient_dir, "image.npy"))
+            and os.path.isfile(os.path.join(patient_dir, "mask.npy"))
+        ):
+            pids.append(name)
+    print(f"Discovered {len(pids)} patients in {data_dir}")
+    return pids
+
+
 def train_val_test_split(
-    json_path: str,
+    all_pids: list[str],
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     seed: int = 42,
 ):
-    with open(json_path) as f:
-        findings = json.load(f)
-
-    all_pids = list(findings.keys())
     rng = random.Random(seed)
-    rng.shuffle(all_pids)
+    pids = list(all_pids)
+    rng.shuffle(pids)
 
-    n = len(all_pids)
+    n = len(pids)
     nt = max(1, int(round(n * train_ratio)))
     nv = max(1, int(round(n * val_ratio)))
     nte = n - nt - nv
@@ -42,9 +58,9 @@ def train_val_test_split(
         nte = 0
         nv = n - nt
 
-    train_ids = all_pids[:nt]
-    val_ids = all_pids[nt : nt + nv]
-    test_ids = all_pids[nt + nv :]
+    train_ids = pids[:nt]
+    val_ids = pids[nt : nt + nv]
+    test_ids = pids[nt + nv :]
 
     print(
         f"Split: Train {len(train_ids)} | Val {len(val_ids)} "
@@ -70,16 +86,22 @@ def main():
         description="Prepare client data assignments for FedMorph FL"
     )
     parser.add_argument(
-        "--patient-json", type=str, default="patient.json",
-        help="Path to patient.json",
+        "--data-dir", type=str, required=True,
+        help="Path to CT data directory (each subfolder = one patient with image.npy + mask.npy)",
     )
     parser.add_argument("--n-clients", type=int, default=3)
     parser.add_argument("--output-dir", type=str, default="fl_clients")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    all_pids = discover_patients(args.data_dir)
+    if not all_pids:
+        print(f"ERROR: No patients found in {args.data_dir}")
+        print("  Each patient folder must contain image.npy and mask.npy")
+        return
+
     train_ids, val_ids, test_ids = train_val_test_split(
-        args.patient_json, seed=args.seed
+        all_pids, seed=args.seed
     )
 
     center_train = split_into_centers(train_ids, args.n_clients, args.seed)
