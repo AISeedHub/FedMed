@@ -24,8 +24,8 @@ fedprox_mu: 0.01          # only used when method = FedProx
 batch_size: 1
 learning_rate: 3.0e-4
 weight_decay: 1.0e-4
-cls_coeff: 0.0            # classification loss weight (no cirrhosis labels)
-morph_coeff: 0.05         # morphological consistency loss weight
+cls_coeff: 0.0            # classification loss weight (disabled)
+morph_coeff: 0.005        # max morph loss weight (applied only in late rounds)
 seg_warmup_epochs: 30     # epochs before enabling cls / morph loss
 seed: 42
 

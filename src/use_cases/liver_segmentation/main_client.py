@@ -6,10 +6,9 @@ Each Windows PC runs one instance of this client.
 The client:
   1. Loads its assigned subset of CT data
   2. Receives global model parameters from the server
-  3. Preserves local GroupNorm parameters (FedBN/FedMorph)
-  4. Trains locally for ``local_epochs``
-  5. Computes seg_dices / morph_diversity for FedMorph aggregation
-  6. Returns updated parameters + metadata to server
+  3. Trains locally with pure segmentation loss (morph loss added late)
+  4. Computes seg_dices for quality-weighted aggregation
+  5. Returns updated parameters + metadata to server
 
 Usage:
   python main_client.py --client-id 0 --server-address 192.168.1.100:9000
@@ -134,7 +133,7 @@ class LiverSegmentationClient(FedFlowerClient):
 
         method = self.config.get("method", "FedMorph")
 
-        if method in ("FedBN", "FedMorph") and self.local_norm_state is not None:
+        if method == "FedBN" and self.local_norm_state is not None:
             for k, v in self.local_norm_state.items():
                 state_dict[k] = v.to(self.device)
 
@@ -194,9 +193,7 @@ class LiverSegmentationClient(FedFlowerClient):
         fl_rounds = config.get("fl_rounds", 50)
 
         lr_scale = 0.5 * (1 + math.cos(math.pi * self.current_round / fl_rounds))
-        cur_lr = config["learning_rate"] * max(
-            lr_scale, 1e-7 / config["learning_rate"]
-        )
+        cur_lr = config["learning_rate"] * max(lr_scale, 0.3)
 
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -205,10 +202,14 @@ class LiverSegmentationClient(FedFlowerClient):
         )
 
         fedprox_mu = config.get("fedprox_mu", 0.0) if method == "FedProx" else 0.0
-        morph_coeff = (
-            config.get("morph_coeff", 0.05) if method == "FedMorph" else 0.0
-        )
-        local_config = {**config, "morph_coeff": morph_coeff}
+
+        morph_start = int(fl_rounds * 0.5)
+        if method == "FedMorph" and self.current_round >= morph_start:
+            alpha = (self.current_round - morph_start) / max(fl_rounds - morph_start, 1)
+            mc = 0.005 * alpha
+        else:
+            mc = 0.0
+        local_config = {**config, "morph_coeff": mc, "cls_coeff": 0.0}
 
         total_loss = 0.0
         for epoch in range(epochs):
@@ -225,7 +226,7 @@ class LiverSegmentationClient(FedFlowerClient):
                     f"LR: {cur_lr:.6f}"
                 )
 
-        if method in ("FedBN", "FedMorph"):
+        if method == "FedBN":
             self.local_norm_state = OrderedDict(
                 (k, v.cpu().clone())
                 for k, v in self.model.state_dict().items()
