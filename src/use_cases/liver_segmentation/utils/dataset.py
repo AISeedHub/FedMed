@@ -10,6 +10,34 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 
+def discover_patients(data_dir: str) -> list[str]:
+    """Scan data_dir for patient folders containing image.npy + mask.npy."""
+    pids = []
+    for name in sorted(os.listdir(data_dir)):
+        patient_dir = os.path.join(data_dir, name)
+        if not os.path.isdir(patient_dir):
+            continue
+        if (
+            os.path.isfile(os.path.join(patient_dir, "image.npy"))
+            and os.path.isfile(os.path.join(patient_dir, "mask.npy"))
+        ):
+            pids.append(name)
+    return pids
+
+
+def auto_split(
+    patient_ids: list[str],
+    train_ratio: float = 0.85,
+    seed: int = 42,
+) -> tuple[list[str], list[str]]:
+    """Split patient IDs into train / val sets."""
+    rng = random.Random(seed)
+    ids = list(patient_ids)
+    rng.shuffle(ids)
+    n_train = max(1, int(round(len(ids) * train_ratio)))
+    return ids[:n_train], ids[n_train:]
+
+
 def resize_volume(vol: np.ndarray, size: int, is_gt: bool = False) -> np.ndarray:
     """Resize a 3-D volume (D, H, W) to (D, size, size) with square padding."""
     H, W = vol.shape[1], vol.shape[2]

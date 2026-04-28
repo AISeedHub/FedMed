@@ -27,6 +27,7 @@ weight_decay: 1.0e-4
 cls_coeff: 0.0            # classification loss weight (disabled)
 morph_coeff: 0.005        # max morph loss weight (applied only in late rounds)
 seg_warmup_epochs: 30     # epochs before enabling cls / morph loss
+train_ratio: 0.85         # train/val split ratio (auto-split on each client)
 seed: 42
 
 # Windows: keep num_workers=0 to avoid multiprocessing issues.
@@ -48,20 +49,19 @@ image_size: 128
 volume_depth: 64
 
 # ------------------------------------------------------------------
-# Data Paths
+# Data Path
 # ------------------------------------------------------------------
-# These paths are the DEFAULTS.  Override per-machine via:
-#   - command-line args:  --data-dir / --client-data-dir
-#   - env vars:           FEDMORPH_DATA_DIR / FEDMORPH_CLIENT_DATA_DIR
+# Each client points to its OWN local data directory.
+# The directory should contain patient subfolders, each with image.npy + mask.npy.
+# Override per-machine via:
+#   - command-line arg:  --data-dir D:\data\liver_ct
+#   - env var:           FEDMORPH_DATA_DIR=D:\data\liver_ct
 #
-# data_dir       : directory containing patient folders (each with image.npy, mask.npy)
-# client_data_dir: directory containing client_N_patients.json
-#                  (created by prepare_client_data.py)
-#
-# === Linux (server / development) ===
-data_dir: "/data/jin/data/combined"
-client_data_dir: "/data/jin/FedFace/fl_clients"
-#
-# === Windows (client PC) examples ===
-# data_dir: "D:\\data\\combined"
-# client_data_dir: "D:\\data\\fl_clients"
+# Example directory layout:
+#   D:\data\liver_ct\
+#     patient_001\image.npy
+#     patient_001\mask.npy
+#     patient_002\image.npy
+#     patient_002\mask.npy
+#     ...
+data_dir: "./data"

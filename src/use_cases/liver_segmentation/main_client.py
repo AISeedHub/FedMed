@@ -2,17 +2,17 @@
 FedMorph Liver Segmentation — Federated Client
 ================================================
 
-Each Windows PC runs one instance of this client.
+Each hospital PC runs one instance of this client.
 The client:
-  1. Loads its assigned subset of CT data
-  2. Receives global model parameters from the server
-  3. Trains locally with pure segmentation loss (morph loss added late)
-  4. Computes seg_dices for quality-weighted aggregation
-  5. Returns updated parameters + metadata to server
+  1. Scans its local data directory for CT volumes (image.npy + mask.npy)
+  2. Auto-splits into train/val sets
+  3. Receives global model from the server, trains locally
+  4. Returns updated model weights + seg quality metrics to server
+
+No central data distribution needed — each site only accesses its own data.
 
 Usage:
-  python main_client.py --client-id 0 --server-address 192.168.1.100:9000
-  python main_client.py --client-id 1 --config configs/base.yaml
+  python main_client.py --data-dir D:\\data\\liver_ct --server-address 192.168.1.100:9000
 """
 
 import argparse
@@ -38,6 +38,8 @@ from src.fed_core.fed_client import FedFlowerClient
 from src.use_cases.liver_segmentation.models.segresnet_cirrhosis import build_model
 from src.use_cases.liver_segmentation.utils.dataset import (
     LiverSeg9Dataset,
+    auto_split,
+    discover_patients,
     seg9_collate,
 )
 from src.use_cases.liver_segmentation.utils.loss import compute_loss
@@ -53,7 +55,7 @@ def _is_norm(name: str) -> bool:
 
 
 class LiverSegmentationClient(FedFlowerClient):
-    """FedMorph client for 9-segment liver CT segmentation + cirrhosis."""
+    """FedMorph client for 9-segment liver CT segmentation."""
 
     def __init__(self, client_id: int, config: dict):
         super().__init__(client_id, config)
@@ -65,27 +67,29 @@ class LiverSegmentationClient(FedFlowerClient):
         # ── Model ──
         self.model = build_model(config, self.device)
 
-        # ── Data ──
-        client_data_dir = config["client_data_dir"]
-        patient_list_path = os.path.join(
-            client_data_dir, f"client_{client_id}_patients.json"
+        # ── Data: auto-discover from local directory ──
+        data_dir = config["data_dir"]
+        all_pids = discover_patients(data_dir)
+        if not all_pids:
+            raise RuntimeError(
+                f"No patients found in {data_dir}. "
+                "Each subfolder must contain image.npy and mask.npy."
+            )
+
+        train_ids, val_ids = auto_split(
+            all_pids,
+            train_ratio=config.get("train_ratio", 0.85),
+            seed=config.get("seed", 42),
         )
-        with open(patient_list_path) as f:
-            patient_data = json.load(f)
-
-        self.cirrhosis_dict = {}
-
-        train_ids = patient_data["train"]
-        val_ids = patient_data["val"]
         nc = config["num_classes"]
 
         self.train_ds = LiverSeg9Dataset(
-            config["data_dir"], train_ids, self.cirrhosis_dict,
+            data_dir, train_ids, None,
             config["image_size"], config["volume_depth"],
             mode="train", num_classes=nc,
         )
         self.val_ds = LiverSeg9Dataset(
-            config["data_dir"], val_ids, self.cirrhosis_dict,
+            data_dir, val_ids, None,
             config["image_size"], config["volume_depth"],
             mode="val", num_classes=nc,
         )
@@ -114,9 +118,10 @@ class LiverSegmentationClient(FedFlowerClient):
         self.current_round = 0
 
         print(f"[Client {client_id}] Device: {self.device}")
+        print(f"[Client {client_id}] Data: {data_dir}")
         print(
-            f"[Client {client_id}] Train: {len(self.train_ds)}, "
-            f"Val: {len(self.val_ds)} patients"
+            f"[Client {client_id}] Patients: {len(all_pids)} total "
+            f"(train {len(self.train_ds)}, val {len(self.val_ds)})"
         )
 
     # ------------------------------------------------------------------
@@ -241,7 +246,7 @@ class LiverSegmentationClient(FedFlowerClient):
         total_loss, n = 0.0, 0
 
         warmup = config.get("seg_warmup_epochs", 30)
-        cc = 0.0 if epoch < warmup else config.get("cls_coeff", 0.5)
+        cc = 0.0 if epoch < warmup else config.get("cls_coeff", 0.0)
         mc = 0.0 if epoch < warmup else config.get("morph_coeff", 0.0)
 
         gp = None
@@ -328,7 +333,8 @@ def main():
         description="FedMorph Liver Segmentation — Federated Client"
     )
     parser.add_argument(
-        "--client-id", type=int, required=True, help="Client ID (0, 1, 2)"
+        "--client-id", type=int, default=0,
+        help="Client ID (for logging only, data is auto-discovered)",
     )
     parser.add_argument(
         "--server-address", type=str, default=None,
@@ -340,22 +346,14 @@ def main():
     )
     parser.add_argument(
         "--data-dir", type=str, default=None,
-        help="CT data directory (overrides config)",
-    )
-    parser.add_argument(
-        "--client-data-dir", type=str, default=None,
-        help="Client patient-list directory (overrides config)",
+        help="Local CT data directory (overrides config)",
     )
     args = parser.parse_args()
 
     config = load_config(args.config)
 
     config["data_dir"] = os.environ.get(
-        "FEDMORPH_DATA_DIR", args.data_dir or config["data_dir"]
-    )
-    config["client_data_dir"] = os.environ.get(
-        "FEDMORPH_CLIENT_DATA_DIR",
-        args.client_data_dir or config["client_data_dir"],
+        "FEDMORPH_DATA_DIR", args.data_dir or config.get("data_dir", ".")
     )
     server_addr = (
         args.server_address
@@ -378,7 +376,6 @@ def main():
     print(f"FedMorph - Liver Segmentation Client {args.client_id}")
     print(f"  Method:  {config.get('method', 'FedMorph')}")
     print(f"  Data:    {config['data_dir']}")
-    print(f"  Clients: {config['client_data_dir']}")
     print(f"  Server:  {server_addr}")
     print("=" * 60)
 

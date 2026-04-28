@@ -2,22 +2,41 @@
 
 **FedMorph — Morphology-Aware Federated Learning for Medical Image Segmentation**
 
-Anatomy-Decoupled Aggregation strategy for federated liver CT segmentation across distributed hospital sites.
+각 병원의 데이터는 외부로 반출되지 않고, 모델 가중치만 서버와 주고받는 실제 연합학습 구조.
 
 ## Architecture
 
 ![FedMed System Architecture](docs/architecture.png)
 
-- **Model**: MONAI SegResNet + MorphologicalDescriptor + SegmentFeatureFusion (~1.2M params)
-- **FL Framework**: [Flower](https://flower.ai/) (gRPC server–client)
-- **Aggregation**: FedMorph — seg_head에만 quality-weighted, 나머지는 FedAvg
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│   병원 A (Client)          서버              병원 B (Client)      │
+│   ┌──────────────┐    ┌──────────┐    ┌──────────────┐          │
+│   │ 자체 CT 데이터 │    │ 데이터 없음 │    │ 자체 CT 데이터 │          │
+│   │ 로컬 학습     │◄──►│ 모델 집계  │◄──►│ 로컬 학습     │          │
+│   │ 가중치만 전송  │    │ 재배포     │    │ 가중치만 전송  │          │
+│   └──────────────┘    └──────────┘    └──────────────┘          │
+│                            ▲                                     │
+│                            │                                     │
+│                       ┌──────────────┐                          │
+│                       │ 자체 CT 데이터 │                          │
+│                       │ 로컬 학습     │                          │
+│                       │ 가중치만 전송  │                          │
+│                       └──────────────┘                          │
+│                       병원 C (Client)                           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- **Model**: MONAI SegResNet + MorphologicalDescriptor (~1.2M params)
+- **FL Framework**: [Flower](https://flower.ai/) (gRPC)
+- **핵심**: 데이터는 각 병원에 머무르고, 모델 파라미터만 네트워크로 전송
 
 | Parameter Group | Aggregation Strategy |
 |----------------|---------------------|
-| Backbone (encoder/decoder) | Data-size weighted average (FedAvg) |
-| GroupNorm layers | Data-size weighted average (FedAvg) |
+| Backbone + GroupNorm | Data-size weighted average (FedAvg) |
 | Segmentation head (`conv_final`) | Per-segment Dice quality × data-size weighted |
-| Classification head + MorphDesc | Data-size weighted average (FedAvg) |
 
 ## Supported FL Methods
 
@@ -32,20 +51,15 @@ Anatomy-Decoupled Aggregation strategy for federated liver CT segmentation acros
 
 ## Data Format
 
-### CT 데이터 디렉토리 구조
-
-각 환자 폴더 안에 `image.npy`와 `mask.npy` 두 파일이 필요합니다.
-`patient.json` 등 별도 메타파일은 **필요 없습니다** — 데이터 폴더를 자동 스캔합니다.
+각 클라이언트(병원) PC의 **로컬 데이터 폴더** 안에 환자별 하위 폴더가 있어야 합니다.
+별도의 메타파일(patient.json 등)은 필요 없습니다 — 자동으로 스캔합니다.
 
 ```
-combined/
+D:\data\liver_ct\               ← 각 병원의 로컬 경로
 ├── patient_001/
-│   ├── image.npy          # CT volume, shape: (D, H, W), dtype: float32 or uint8
-│   └── mask.npy           # Segmentation mask, shape: (C, D, H, W), dtype: uint8
+│   ├── image.npy              # CT volume, shape: (D, H, W)
+│   └── mask.npy               # Segmentation mask, shape: (C, D, H, W)
 ├── patient_002/
-│   ├── image.npy
-│   └── mask.npy
-├── patient_003/
 │   ├── image.npy
 │   └── mask.npy
 └── ...
@@ -53,105 +67,49 @@ combined/
 
 > 폴더명이 곧 환자 ID입니다. 어떤 이름이든 상관없습니다.
 
-**mask.npy 채널 구성** (C = num_classes + 1):
+**mask.npy 채널 구성** (C >= 10):
 - `mask[0]`: background
-- `mask[1]` ~ `mask[9]`: 9개 간 세그먼트 (seg1, seg2, seg3, seg4a, seg4b, seg5, seg6, seg7, seg8)
-
-> 코드에서는 `mask[1:10]`만 사용합니다 (background 제외).
+- `mask[1]` ~ `mask[9]`: 9개 간 세그먼트 (seg1 ~ seg8)
 
 ---
 
-## 실행 가이드 (Step-by-Step)
+## 실행 가이드
 
-### Step 0. 환경 설치 (모든 PC)
+### Step 1. 환경 설치 (모든 PC)
 
 ```bash
-# Python 3.10+ 필요
 git clone https://github.com/AISeedHub/FedMed.git
 cd FedMed
 uv sync
 ```
 
-### Step 1. 데이터 분배 준비 (서버 PC에서 1회만)
+### Step 2. 데이터 검증 (각 클라이언트 PC)
 
-`prepare_client_data.py`를 실행하여 환자를 클라이언트별로 나눕니다.
-**데이터 폴더 경로만 지정하면 자동으로 환자를 스캔합니다.**
+학습 전에 로컬 데이터가 올바른 형식인지 확인합니다.
 
 ```bash
 uv run python src/use_cases/liver_segmentation/prepare_client_data.py \
-    --data-dir /path/to/combined \
-    --n-clients 3 \
-    --output-dir fl_clients
+    --data-dir D:\data\liver_ct
 ```
 
-실행 결과 `fl_clients/` 폴더가 생성됩니다:
+출력 예시:
 
 ```
-fl_clients/
-├── client_0_patients.json     # Client 0에 할당된 train/val 환자 ID
-├── client_1_patients.json     # Client 1에 할당된 train/val 환자 ID
-├── client_2_patients.json     # Client 2에 할당된 train/val 환자 ID
-└── test_patients.json         # 공통 테스트 환자 ID
+Found 25 patients. Validating...
+
+Validation: 25 OK, 0 with issues
+
+Train/Val Split Preview
+  Train: 21 patients
+  Val:   4 patients
+  Ratio: 84% / 16%
+
+Ready for Federated Learning
 ```
 
-각 파일의 포맷 (폴더명이 자동으로 환자 ID가 됨):
+### Step 3. 서버 실행 (서버 PC)
 
-```json
-{
-  "train": ["patient_001", "patient_003", "patient_005", ...],
-  "val": ["patient_010", "patient_012"]
-}
-```
-
-### Step 2. 각 클라이언트 PC에 데이터 복사
-
-각 Windows PC에 아래 두 항목을 복사합니다:
-
-```
-PC-A (Client 0):
-  D:\data\combined\          ← CT 데이터 전체 (image.npy, mask.npy)
-  D:\data\fl_clients\        ← fl_clients/ 폴더 전체
-
-PC-B (Client 1):
-  D:\data\combined\
-  D:\data\fl_clients\
-
-PC-C (Client 2):
-  D:\data\combined\
-  D:\data\fl_clients\
-```
-
-> **참고**: 각 클라이언트는 자기에게 할당된 `client_N_patients.json`만 읽지만,
-> CT 데이터 폴더(`combined/`)는 전체가 있어야 합니다 (자기 환자 폴더에 접근해야 하므로).
-
-### Step 3. 설정 파일 확인
-
-`src/use_cases/liver_segmentation/configs/base.yaml`:
-
-```yaml
-# Server
-server_address: "0.0.0.0:9000"    # 서버 바인드 주소 (변경 불필요)
-fl_rounds: 50                      # 연합학습 라운드 수
-min_clients: 3                     # 최소 클라이언트 수 (모두 접속해야 시작)
-local_epochs: 10                   # 라운드당 로컬 학습 에포크 수
-
-# Method
-method: "FedMorph"                 # FedAvg | FedProx | FedBN | FedMorph
-
-# Training
-batch_size: 1
-learning_rate: 3.0e-4
-morph_coeff: 0.005                 # 후반 라운드에서만 점진 적용 (0→0.005)
-cls_coeff: 0.0                     # 비활성
-
-# Data paths (기본값, 각 PC에서 환경변수/인자로 오버라이드)
-data_dir: "/data/jin/data/combined"
-client_data_dir: "/data/jin/FedFace/fl_clients"
-```
-
-### Step 4. 서버 실행 (서버 PC)
-
-서버를 **먼저** 실행합니다. 모든 클라이언트가 접속할 때까지 대기합니다.
+서버를 **먼저** 실행합니다. 서버에는 **데이터가 필요 없습니다**.
 
 ```bash
 # Linux
@@ -164,11 +122,10 @@ src\run_liver_server.bat
 또는 직접:
 
 ```bash
-uv run python src/use_cases/liver_segmentation/main_server.py \
-    --config src/use_cases/liver_segmentation/configs/base.yaml
+uv run python src/use_cases/liver_segmentation/main_server.py
 ```
 
-서버가 시작되면 아래와 같은 메시지가 출력됩니다:
+서버가 시작되면:
 
 ```
 FedMorph - Liver Segmentation Server
@@ -176,54 +133,78 @@ FedMorph - Liver Segmentation Server
   Method:       FedMorph
   Rounds:       50
   Min Clients:  3
-  Local Epochs: 10
 ============================================================
 Listening on 0.0.0.0:9000
 Waiting for 3 clients to connect ...
 ```
 
-### Step 5. 클라이언트 실행 (각 PC)
+### Step 4. 클라이언트 실행 (각 병원 PC)
 
-서버가 실행된 후, 각 클라이언트 PC에서 실행합니다. **순서는 상관없습니다.**
+서버 IP를 지정하여 실행합니다. **순서 무관**, 각자 로컬 데이터를 자동 스캔합니다.
 
 ```bash
-# Windows — 서버 IP가 192.168.1.100인 경우
-src\run_liver_client.bat 0 192.168.1.100:9000     # PC-A (Client 0)
-src\run_liver_client.bat 1 192.168.1.100:9000     # PC-B (Client 1)
-src\run_liver_client.bat 2 192.168.1.100:9000     # PC-C (Client 2)
+# Windows
+src\run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct
 
 # Linux
-./src/run_liver_client.sh 0 192.168.1.100:9000
+./src/run_liver_client.sh 192.168.1.100:9000 /data/liver_ct
 ```
 
 또는 직접:
 
 ```bash
 uv run python src/use_cases/liver_segmentation/main_client.py \
-    --client-id 0 \
     --server-address 192.168.1.100:9000 \
-    --data-dir D:\data\combined \
-    --client-data-dir D:\data\fl_clients
+    --data-dir D:\data\liver_ct
 ```
 
-**데이터 경로 오버라이드 방법 (우선순위 높은 순):**
+**데이터 경로 지정 방법 (우선순위 순):**
 
 | 방법 | 예시 |
 |------|------|
-| 커맨드라인 인자 | `--data-dir D:\data\combined` |
-| 환경변수 | `set FEDMORPH_DATA_DIR=D:\data\combined` |
-| config YAML | `data_dir: "D:\data\combined"` |
+| 커맨드라인 인자 | `--data-dir D:\data\liver_ct` |
+| 환경변수 | `set FEDMORPH_DATA_DIR=D:\data\liver_ct` |
+| config YAML | `data_dir: "D:\data\liver_ct"` |
 
-### Step 6. 학습 진행
+### Step 5. 학습 진행
 
-3개 클라이언트가 모두 접속하면 자동으로 학습이 시작됩니다.
+모든 클라이언트가 접속하면 자동으로 시작됩니다.
 
 ```
+[Client 0] Data: D:\data\liver_ct
+[Client 0] Patients: 25 total (train 21, val 4)
 [Client 0] === Round 1 ===
 [Client 0] Epoch 3/10, Loss: 1.2345, LR: 0.000300
-[Client 0] Epoch 6/10, Loss: 0.9876, LR: 0.000300
-[Client 0] Epoch 10/10, Loss: 0.8765, LR: 0.000300
-[Client 0] Seg Dice mean: 0.1234, Morph div: 0.000456
+...
+```
+
+---
+
+## 실행 흐름
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  서버 PC (데이터 없음)                                       │
+│    run_liver_server.bat                                     │
+│    → "Waiting for 3 clients..." 대기                        │
+│                                                             │
+│  병원 A PC (자체 데이터: D:\data\liver_ct)                   │
+│    run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct │
+│    → 자동 스캔: 25명 → train 21 / val 4                     │
+│                                                             │
+│  병원 B PC (자체 데이터: E:\ct_data)                         │
+│    run_liver_client.bat 192.168.1.100:9000 E:\ct_data       │
+│    → 자동 스캔: 30명 → train 25 / val 5                     │
+│                                                             │
+│  병원 C PC (자체 데이터: C:\medical\liver)                   │
+│    run_liver_client.bat 192.168.1.100:9000 C:\medical\liver │
+│    → 자동 스캔: 18명 → train 15 / val 3                     │
+│                                                             │
+│  → 3개 접속 완료 → 50 rounds 자동 학습 시작                  │
+│  → 각 라운드: 모델 배포 → 로컬 학습 → 가중치 수집 → 집계     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -233,8 +214,8 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 | 항목 | 서버 PC | 클라이언트 PC |
 |------|---------|--------------|
 | 고정 IP | **필요** (또는 DDNS) | 불필요 |
-| 포트 개방 | **9000번 인바운드** 허용 | 불필요 |
-| 방화벽 | 9000 포트 허용 설정 | 별도 설정 없음 |
+| 포트 개방 | **9000번 인바운드** | 불필요 |
+| 데이터 | 없음 | 자체 로컬 데이터만 |
 
 **Windows 방화벽 포트 개방 (서버 PC만):**
 
@@ -242,56 +223,18 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 netsh advfirewall firewall add rule name="FedMorph Server" dir=in action=allow protocol=TCP localport=9000
 ```
 
-> 클라이언트는 서버로 **아웃바운드** TCP 연결만 하므로 포트 개방이 필요 없습니다.
-
----
-
-## 실행 순서 요약
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. prepare_client_data.py  (서버 PC에서 1회)               │
-│     → fl_clients/ 생성                                      │
-│                                                             │
-│  2. 데이터 복사                                              │
-│     → combined/ + fl_clients/ 를 각 PC에 복사               │
-│                                                             │
-│  3. 서버 실행  (서버 PC)                                     │
-│     → run_liver_server.bat                                  │
-│     → "Waiting for 3 clients..." 메시지 확인                 │
-│                                                             │
-│  4. 클라이언트 실행  (각 PC, 순서 무관)                       │
-│     → run_liver_client.bat 0 <SERVER_IP>:9000               │
-│     → run_liver_client.bat 1 <SERVER_IP>:9000               │
-│     → run_liver_client.bat 2 <SERVER_IP>:9000               │
-│                                                             │
-│  5. 3개 모두 접속 → 자동 학습 시작 (50 rounds)               │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ---
 
 ## Configuration
 
-Edit `src/use_cases/liver_segmentation/configs/base.yaml`:
+`src/use_cases/liver_segmentation/configs/base.yaml`:
 
 ```yaml
 method: "FedMorph"        # FedAvg | FedProx | FedBN | FedMorph
 fl_rounds: 50
 min_clients: 3
 local_epochs: 10
-```
-
-Per-machine data paths can be overridden via environment variables:
-
-```bash
-# Linux
-export FEDMORPH_DATA_DIR=/path/to/combined
-export FEDMORPH_CLIENT_DATA_DIR=/path/to/fl_clients
-
-# Windows
-set FEDMORPH_DATA_DIR=D:\data\combined
-set FEDMORPH_CLIENT_DATA_DIR=D:\data\fl_clients
+data_dir: "./data"        # 각 PC에서 오버라이드
 ```
 
 ## Project Structure
@@ -307,12 +250,12 @@ src/
     models/
       segresnet_cirrhosis.py # SegResNet + MorphDesc + SegmentFeatureFusion
     utils/
-      dataset.py             # 9-segment liver CT dataset
-      loss.py                # Seg + Cls + Morph consistency loss
+      dataset.py             # 9-segment liver CT dataset + auto-discover
+      loss.py                # Seg + Morph consistency loss
       metrics.py             # Dice / HD95 / AUC evaluation
     main_server.py           # Server entry point
-    main_client.py           # Client entry point
-    prepare_client_data.py   # Data distribution script
+    main_client.py           # Client entry point (auto-discovers local data)
+    prepare_client_data.py   # Local data validation tool
   run_liver_server.bat/.sh   # Server launch scripts
   run_liver_client.bat/.sh   # Client launch scripts
 ```
