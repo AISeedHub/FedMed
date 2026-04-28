@@ -35,39 +35,29 @@ Anatomy-Decoupled Aggregation strategy for federated liver CT segmentation acros
 ### CT 데이터 디렉토리 구조
 
 각 환자 폴더 안에 `image.npy`와 `mask.npy` 두 파일이 필요합니다.
+`patient.json` 등 별도 메타파일은 **필요 없습니다** — 데이터 폴더를 자동 스캔합니다.
 
 ```
 combined/
-├── 11167035/
+├── patient_001/
 │   ├── image.npy          # CT volume, shape: (D, H, W), dtype: float32 or uint8
 │   └── mask.npy           # Segmentation mask, shape: (C, D, H, W), dtype: uint8
-├── 11360663/
+├── patient_002/
 │   ├── image.npy
 │   └── mask.npy
-├── 12194009/
+├── patient_003/
 │   ├── image.npy
 │   └── mask.npy
-└── ...                    # 총 62명 환자 (예시)
+└── ...
 ```
+
+> 폴더명이 곧 환자 ID입니다. 어떤 이름이든 상관없습니다.
 
 **mask.npy 채널 구성** (C = num_classes + 1):
 - `mask[0]`: background
 - `mask[1]` ~ `mask[9]`: 9개 간 세그먼트 (seg1, seg2, seg3, seg4a, seg4b, seg5, seg6, seg7, seg8)
 
 > 코드에서는 `mask[1:10]`만 사용합니다 (background 제외).
-
-### patient.json
-
-환자 ID를 키로, finding 정보를 값으로 갖는 JSON 파일입니다. 값이 비어있어도 됩니다.
-
-```json
-{
-  "11167035": [],
-  "11360663": [],
-  "12194009": [],
-  ...
-}
-```
 
 ---
 
@@ -85,10 +75,11 @@ uv sync
 ### Step 1. 데이터 분배 준비 (서버 PC에서 1회만)
 
 `prepare_client_data.py`를 실행하여 환자를 클라이언트별로 나눕니다.
+**데이터 폴더 경로만 지정하면 자동으로 환자를 스캔합니다.**
 
 ```bash
 uv run python src/use_cases/liver_segmentation/prepare_client_data.py \
-    --patient-json /path/to/patient.json \
+    --data-dir /path/to/combined \
     --n-clients 3 \
     --output-dir fl_clients
 ```
@@ -103,12 +94,12 @@ fl_clients/
 └── test_patients.json         # 공통 테스트 환자 ID
 ```
 
-각 파일의 포맷:
+각 파일의 포맷 (폴더명이 자동으로 환자 ID가 됨):
 
 ```json
 {
-  "train": ["11167035", "12194009", "16075078", ...],
-  "val": ["18140264", "21004908"]
+  "train": ["patient_001", "patient_003", "patient_005", ...],
+  "val": ["patient_010", "patient_012"]
 }
 ```
 
