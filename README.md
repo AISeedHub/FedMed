@@ -77,34 +77,76 @@ D:\data\liver_ct\               ← 각 병원의 로컬 경로
 
 ### Step 1. 환경 설치 (모든 PC)
 
+**1-1. uv 설치 (최초 1회)**
+
+```powershell
+# Windows PowerShell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+```bash
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**1-2. 프로젝트 클론 & 의존성 설치**
+
 ```bash
 git clone https://github.com/AISeedHub/FedMed.git
 cd FedMed
 uv sync
 ```
 
-### Step 2. 데이터 검증 (각 클라이언트 PC)
+> `uv sync` 하나로 torch, monai, flwr 등 모든 의존성이 자동 설치됩니다.
+> Windows에서는 CUDA 12.8 PyTorch가 자동으로 설치됩니다.
 
-학습 전에 로컬 데이터가 올바른 형식인지 확인합니다.
+### Step 2. 클라이언트 준비 상태 확인
+
+학습 전에 각 클라이언트 PC의 **의존성, GPU, 데이터, 서버 접속**을 한 번에 확인합니다.
 
 ```bash
-uv run python src/use_cases/liver_segmentation/prepare_client_data.py \
+# 전체 체크 (데이터 + 서버 접속)
+uv run python src/use_cases/liver_segmentation/check_ready.py \
+    --data-dir D:\data\liver_ct \
+    --server-address 192.168.1.100:9000
+
+# 데이터만 확인 (서버 없이)
+uv run python src/use_cases/liver_segmentation/check_ready.py \
     --data-dir D:\data\liver_ct
 ```
 
 출력 예시:
 
 ```
-Found 25 patients. Validating...
+[1/4] Dependencies
+  OK   torch
+  OK   monai
+  OK   flwr
+  ...
 
-Validation: 25 OK, 0 with issues
+[2/4] GPU
+  OK   NVIDIA GeForce RTX 3060
+  OK   VRAM: 12.0 GB
 
-Train/Val Split Preview
-  Train: 21 patients
-  Val:   4 patients
-  Ratio: 84% / 16%
+[3/4] Local Data
+  OK   25 patients found, 25 valid
 
-Ready for Federated Learning
+[4/4] Server Connectivity
+  OK   TCP port 9000 is open (23 ms)
+  OK   gRPC server is responding
+
+  Summary
+  [OK] Dependencies        PASS
+  [OK] GPU                 PASS
+  [OK] Local Data          PASS
+  [OK] Server              PASS
+```
+
+데이터 형식만 상세하게 검증하려면:
+
+```bash
+uv run python src/use_cases/liver_segmentation/prepare_client_data.py \
+    --data-dir D:\data\liver_ct
 ```
 
 ### Step 3. 서버 실행 (서버 PC)
@@ -255,6 +297,7 @@ src/
       metrics.py             # Dice / HD95 / AUC evaluation
     main_server.py           # Server entry point
     main_client.py           # Client entry point (auto-discovers local data)
+    check_ready.py           # Client readiness check (deps, GPU, data, server)
     prepare_client_data.py   # Local data validation tool
   run_liver_server.bat/.sh   # Server launch scripts
   run_liver_client.bat/.sh   # Client launch scripts
