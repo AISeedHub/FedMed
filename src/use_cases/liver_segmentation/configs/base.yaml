@@ -35,7 +35,7 @@ seed: 42
 num_workers: 0
 
 # ------------------------------------------------------------------
-# Model (SegResNetWithCirrhosis)
+# Model (SegResNet + MorphologicalDescriptor)
 # ------------------------------------------------------------------
 num_classes: 9             # 9 liver segments
 init_filters: 8

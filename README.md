@@ -131,10 +131,20 @@ uv sync
 uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:9000 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
 ```
 
-> - 더미 환자 5명 생성 → 의존성/GPU/데이터/서버 접속 확인 → 서버에 접속하여 통신 테스트
+> - 더미 환자 10명 생성 → 의존성/GPU/데이터/서버 접속 확인 → 서버에 접속하여 통신 테스트
 > - 서버가 먼저 실행 중이어야 합니다 (Step 4 참고)
 > - 각 단계가 실패하면 이후 단계는 실행되지 않습니다
 > - 테스트 성공 후 `--data-dir`만 실제 데이터 경로로 변경하면 됩니다
+
+더미 데이터로 4개 방법론 전부 비교 테스트하려면:
+
+```bash
+# 서버
+uv run python src/use_cases/liver_segmentation/benchmark_server.py
+
+# 각 클라이언트
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/benchmark_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
+```
 
 ### Step 3. 클라이언트 준비 상태 확인
 
@@ -249,10 +259,10 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 모든 클라이언트가 접속하면 자동으로 시작됩니다.
 
 ```
-[Client 0] Data: D:\data\liver_ct
-[Client 0] Patients: 25 total (train 17, val 4, test 4)
-[Client 0] === Round 1 ===
-[Client 0] Epoch 3/10, Loss: 1.2345, LR: 0.000300
+[HOSPITAL-A] Data: D:\data\liver_ct
+[HOSPITAL-A] Patients: 25 total (train 17, val 4, test 4)
+[HOSPITAL-A] === Round 1 ===
+[HOSPITAL-A] Epoch 3/10, Loss: 1.2345, LR: 0.000300
 ...
 ```
 
@@ -260,7 +270,7 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 
 ```
 ========================================================================
-  FINAL TEST RESULTS — Client 0
+  FINAL TEST RESULTS — Client [HOSPITAL-A]
 ========================================================================
 Metric               Global (Aggregated)   Local (Last Train)
 ------------------------------------------------------------------------
@@ -279,7 +289,62 @@ Metric               Global (Aggregated)   Local (Last Train)
 
 - **Global**: 서버에서 집계된 모델
 - **Local**: 각 센터에서 마지막으로 로컬 학습한 모델
-- 결과는 `outputs/test_results_client{id}.json`에 저장됩니다
+- 모델 파일: `outputs/global_model_{id}.pth`, `outputs/local_model_{id}.pth`
+- 결과 파일: `outputs/test_results_{id}.json`
+
+---
+
+## 벤치마크 (방법론 비교 실험)
+
+4가지 FL 방법론(FedAvg, FedProx, FedBN, FedMorph)을 순차 실행하여 비교합니다.
+
+**서버:**
+
+```bash
+uv run python src/use_cases/liver_segmentation/benchmark_server.py
+```
+
+**각 클라이언트:**
+
+```bash
+uv run python src/use_cases/liver_segmentation/benchmark_client.py \
+    --server-address 192.168.1.100:9000 \
+    --data-dir D:\data\liver_ct
+```
+
+서버가 FedAvg → FedProx → FedBN → FedMorph 순서로 FL 세션을 실행하고,
+클라이언트는 각 method마다 자동으로 재접속하여 학습에 참여합니다.
+
+모든 method가 끝나면 각 클라이언트에서 비교표가 출력됩니다:
+
+```
+========================================================================
+  BENCHMARK SUMMARY — Client [HOSPITAL-A]
+========================================================================
+  Method        Dice (G)   Dice (L)   HD95 (G)   HD95 (L)
+------------------------------------------------------------------------
+  FedAvg          0.6315     0.6102       7.55       8.12
+  FedProx         0.3218     0.3050      10.68      11.20
+  FedBN           0.4051     0.3900       8.74       9.10
+  FedMorph *      0.6824     0.6500       6.54       7.00
+========================================================================
+  Best global Dice: FedMorph (0.6824)
+========================================================================
+```
+
+특정 방법만 비교하려면:
+
+```bash
+# 서버
+uv run python src/use_cases/liver_segmentation/benchmark_server.py --methods FedAvg FedMorph
+
+# 클라이언트
+uv run python src/use_cases/liver_segmentation/benchmark_client.py \
+    --server-address 192.168.1.100:9000 --data-dir D:\data\liver_ct \
+    --methods FedAvg FedMorph
+```
+
+> 결과는 `outputs/benchmark/` 폴더에 method별 모델과 JSON 결과가 저장됩니다.
 
 ---
 
@@ -345,23 +410,29 @@ data_dir: "./data"        # 각 PC에서 오버라이드
 ```
 src/
   fed_core/
-    fed_server.py            # Flower server wrapper
-    fed_client.py            # Abstract FL client base
-    fedmorph_strategy.py     # FedMorph aggregation strategy
+    fed_server.py              # Flower server wrapper
+    fed_client.py              # Abstract FL client base
+    fedmorph_strategy.py       # FedMorph aggregation strategy
   use_cases/liver_segmentation/
-    configs/base.yaml        # Training & FL configuration
+    configs/base.yaml          # Training & FL configuration
     models/
-      segresnet_morph.py     # SegResNet + MorphologicalDescriptor
+      segresnet_morph.py       # SegResNet + MorphologicalDescriptor
     utils/
-      dataset.py             # 9-segment liver CT dataset + auto-discover
-      loss.py                # Seg + Morph consistency loss
-      metrics.py             # Dice / HD95 / AUC evaluation
-    main_server.py           # Server entry point
-    main_client.py           # Client entry point (auto-discovers local data)
-    check_ready.py           # Client readiness check (deps, GPU, data, server)
-    prepare_client_data.py   # Local data validation tool
-  run_liver_server.bat/.sh   # Server launch scripts
-  run_liver_client.bat/.sh   # Client launch scripts
+      dataset.py               # 9-segment liver CT dataset + auto-discover
+      loss.py                  # Seg + Morph consistency loss
+      metrics.py               # Dice / HD95 evaluation
+    main_server.py             # Single-method server
+    main_client.py             # Single-method client
+    benchmark_server.py        # Multi-method benchmark server
+    benchmark_client.py        # Multi-method benchmark client
+    check_ready.py             # Client readiness check (deps, GPU, data, server)
+    prepare_client_data.py     # Local data validation tool
+  run_liver_server.bat/.sh     # Server launch scripts
+  run_liver_client.bat/.sh     # Client launch scripts
+tests/
+  generate_dummy_data.py       # Dummy CT data generator
+  test_e2e_aggregation.py      # In-process FL simulation test
+  test_fl_communication.py     # Real gRPC communication test
 ```
 
 ## Acknowledgments
