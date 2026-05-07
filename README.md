@@ -128,7 +128,7 @@ uv sync
 더미 데이터 생성 → 준비 상태 확인 → 통신 테스트를 한 번에 실행:
 
 ```bash
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 5 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:9000 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:9000 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
 ```
 
 > - 더미 환자 5명 생성 → 의존성/GPU/데이터/서버 접속 확인 → 서버에 접속하여 통신 테스트

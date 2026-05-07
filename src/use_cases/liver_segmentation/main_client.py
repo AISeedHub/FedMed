@@ -472,19 +472,27 @@ def main():
         server_address=server_addr, client=client,
     )
 
-    # ── Final test evaluation after FL completes ──
+    # ── Save models & run final test after FL completes ──
+    out_dir = config.get("output_dir", "outputs")
+    os.makedirs(out_dir, exist_ok=True)
+
+    global_path = os.path.join(out_dir, f"global_model_{client_id}.pth")
+    torch.save(client.model.state_dict(), global_path)
+    print(f"\n[Client] Global (aggregated) model saved to {global_path}")
+
+    if client.last_local_state is not None:
+        local_path = os.path.join(out_dir, f"local_model_{client_id}.pth")
+        torch.save(client.last_local_state, local_path)
+        print(f"[Client] Local (last trained) model saved to {local_path}")
+
     if len(client.test_ds) > 0:
-        print("\n[Client] FL training complete. Running final test evaluation...")
+        print("[Client] Running final test evaluation...")
         test_results = client.run_final_test()
         _print_final_report(
             client_id, test_results, config["num_classes"],
         )
 
-        out_dir = config.get("output_dir", "outputs")
-        os.makedirs(out_dir, exist_ok=True)
-        result_path = os.path.join(
-            out_dir, f"test_results_{client_id}.json"
-        )
+        result_path = os.path.join(out_dir, f"test_results_{client_id}.json")
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(test_results, f, indent=2, ensure_ascii=False)
         print(f"[Client] Test results saved to {result_path}")
