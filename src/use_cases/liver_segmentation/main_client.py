@@ -58,7 +58,12 @@ def _is_norm(name: str) -> bool:
 class LiverSegmentationClient(FedFlowerClient):
     """FedMorph client for 9-segment liver CT segmentation."""
 
-    def __init__(self, client_id: str, config: dict):
+    def __init__(self, client_id: str, config: dict, split=None):
+        """
+        Args:
+            split: optional pre-computed (train_ids, val_ids, test_ids) tuple.
+                   If None, auto_split is called internally.
+        """
         super().__init__(client_id, config)
 
         self.device = torch.device(
@@ -68,21 +73,23 @@ class LiverSegmentationClient(FedFlowerClient):
         # ── Model ──
         self.model = build_model(config, self.device)
 
-        # ── Data: auto-discover from local directory ──
+        # ── Data ──
         data_dir = config["data_dir"]
-        all_pids = discover_patients(data_dir)
-        if not all_pids:
-            raise RuntimeError(
-                f"No patients found in {data_dir}. "
-                "Each subfolder must contain image.npy and mask.npy."
+        if split is not None:
+            train_ids, val_ids, test_ids = split
+        else:
+            all_pids = discover_patients(data_dir)
+            if not all_pids:
+                raise RuntimeError(
+                    f"No patients found in {data_dir}. "
+                    "Each subfolder must contain image.npy and mask.npy."
+                )
+            train_ids, val_ids, test_ids = auto_split(
+                all_pids,
+                train_ratio=config.get("train_ratio", 0.70),
+                val_ratio=config.get("val_ratio", 0.15),
+                seed=config.get("seed", 42),
             )
-
-        train_ids, val_ids, test_ids = auto_split(
-            all_pids,
-            train_ratio=config.get("train_ratio", 0.70),
-            val_ratio=config.get("val_ratio", 0.15),
-            seed=config.get("seed", 42),
-        )
         nc = config["num_classes"]
 
         self.train_ds = LiverSeg9Dataset(

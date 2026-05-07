@@ -46,16 +46,15 @@ from src.use_cases.liver_segmentation.utils.dataset import (
     auto_split,
     discover_patients,
 )
-from src.use_cases.liver_segmentation.utils.metrics import evaluate
 
 ALL_METHODS = ["FedAvg", "FedProx", "FedBN", "FedMorph"]
 
 
-def run_one_method(method, config, client_id, server_addr, out_dir):
+def run_one_method(method, config, client_id, server_addr, out_dir, split):
     """Run a single FL method and return test results."""
     method_config = {**config, "method": method}
 
-    client = LiverSegmentationClient(client_id, method_config)
+    client = LiverSegmentationClient(client_id, method_config, split=split)
 
     print(f"  Connecting to server at {server_addr} ...")
     fl.client.start_numpy_client(
@@ -152,12 +151,29 @@ def main():
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
+    # ── Data split: computed ONCE, shared across all methods ──
+    data_dir = config["data_dir"]
+    all_pids = discover_patients(data_dir)
+    if not all_pids:
+        raise RuntimeError(f"No patients found in {data_dir}")
+
+    train_ids, val_ids, test_ids = auto_split(
+        all_pids,
+        train_ratio=config.get("train_ratio", 0.70),
+        val_ratio=config.get("val_ratio", 0.15),
+        seed=config.get("seed", 42),
+    )
+    split = (train_ids, val_ids, test_ids)
+
     print("=" * 60)
     print(f"  FedMorph Benchmark Client [{client_id}]")
     print("=" * 60)
     print(f"  Methods:  {', '.join(methods)}")
-    print(f"  Data:     {config['data_dir']}")
+    print(f"  Data:     {data_dir}")
+    print(f"  Patients: {len(all_pids)} total "
+          f"(train {len(train_ids)}, val {len(val_ids)}, test {len(test_ids)})")
     print(f"  Server:   {args.server_address}")
+    print(f"  Split is FIXED across all methods (seed={config.get('seed', 42)})")
     print("=" * 60)
 
     out_dir = os.path.join(config.get("output_dir", "outputs"), "benchmark")
@@ -170,7 +186,7 @@ def main():
         print(f"{'#' * 60}")
 
         results = run_one_method(
-            method, config, client_id, args.server_address, out_dir,
+            method, config, client_id, args.server_address, out_dir, split,
         )
         all_results.append(results)
 
