@@ -122,7 +122,21 @@ uv sync
 > `uv sync` 하나로 torch, monai, flwr 등 모든 의존성이 자동 설치됩니다.
 > Windows에서는 CUDA 12.8 PyTorch가 자동으로 설치됩니다.
 
-### Step 2. 클라이언트 준비 상태 확인
+### Step 2. 더미 데이터로 사전 테스트 (선택)
+
+실제 데이터 없이 환경 설정과 서버 통신이 정상인지 미리 검증할 수 있습니다.
+더미 데이터 생성 → 준비 상태 확인 → 통신 테스트를 한 번에 실행:
+
+```bash
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 5 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:9000 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
+```
+
+> - 더미 환자 5명 생성 → 의존성/GPU/데이터/서버 접속 확인 → 서버에 접속하여 통신 테스트
+> - 서버가 먼저 실행 중이어야 합니다 (Step 4 참고)
+> - 각 단계가 실패하면 이후 단계는 실행되지 않습니다
+> - 테스트 성공 후 `--data-dir`만 실제 데이터 경로로 변경하면 됩니다
+
+### Step 3. 클라이언트 준비 상태 확인
 
 학습 전에 각 클라이언트 PC의 **의존성, GPU, 데이터, 서버 접속**을 한 번에 확인합니다.
 
@@ -171,7 +185,7 @@ uv run python src/use_cases/liver_segmentation/prepare_client_data.py \
     --data-dir D:\data\liver_ct
 ```
 
-### Step 3. 서버 실행 (서버 PC)
+### Step 4. 서버 실행 (서버 PC)
 
 서버를 **먼저** 실행합니다. 서버에는 **데이터가 필요 없습니다**.
 
@@ -202,7 +216,7 @@ Listening on 0.0.0.0:9000
 Waiting for 3 clients to connect ...
 ```
 
-### Step 4. 클라이언트 실행 (각 병원 PC)
+### Step 5. 클라이언트 실행 (각 병원 PC)
 
 서버 IP를 지정하여 실행합니다. **순서 무관**, 각자 로컬 데이터를 자동 스캔합니다.
 
@@ -230,17 +244,42 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 | 환경변수 | `set FEDMORPH_DATA_DIR=D:\data\liver_ct` |
 | config YAML | `data_dir: "D:\data\liver_ct"` |
 
-### Step 5. 학습 진행
+### Step 6. 학습 진행
 
 모든 클라이언트가 접속하면 자동으로 시작됩니다.
 
 ```
 [Client 0] Data: D:\data\liver_ct
-[Client 0] Patients: 25 total (train 21, val 4)
+[Client 0] Patients: 25 total (train 17, val 4, test 4)
 [Client 0] === Round 1 ===
 [Client 0] Epoch 3/10, Loss: 1.2345, LR: 0.000300
 ...
 ```
+
+모든 라운드가 끝나면 각 클라이언트에서 **test set 최종 평가**가 자동 실행됩니다:
+
+```
+========================================================================
+  FINAL TEST RESULTS — Client 0
+========================================================================
+Metric               Global (Aggregated)   Local (Last Train)
+------------------------------------------------------------------------
+  Dice (mean)                      0.7234                 0.6891
+  HD95 (mean)                      5.1200                 6.3400
+  VR Error                         0.0312                 0.0456
+------------------------------------------------------------------------
+  Per-Segment Dice
+    Seg 1                           0.8100                 0.7800
+    Seg 2                           0.7500                 0.7200
+    ...
+========================================================================
+  >> Global model wins (federated aggregation is effective)
+========================================================================
+```
+
+- **Global**: 서버에서 집계된 모델
+- **Local**: 각 센터에서 마지막으로 로컬 학습한 모델
+- 결과는 `outputs/test_results_client{id}.json`에 저장됩니다
 
 ---
 
@@ -255,15 +294,15 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 │                                                             │
 │  병원 A PC (자체 데이터: D:\data\liver_ct)                   │
 │    run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct │
-│    → 자동 스캔: 25명 → train 21 / val 4                     │
+│    → 자동 스캔: 25명 → train 17 / val 4 / test 4            │
 │                                                             │
 │  병원 B PC (자체 데이터: E:\ct_data)                         │
 │    run_liver_client.bat 192.168.1.100:9000 E:\ct_data       │
-│    → 자동 스캔: 30명 → train 25 / val 5                     │
+│    → 자동 스캔: 30명 → train 21 / val 5 / test 4            │
 │                                                             │
 │  병원 C PC (자체 데이터: C:\medical\liver)                   │
 │    run_liver_client.bat 192.168.1.100:9000 C:\medical\liver │
-│    → 자동 스캔: 18명 → train 15 / val 3                     │
+│    → 자동 스캔: 18명 → train 12 / val 3 / test 3            │
 │                                                             │
 │  → 3개 접속 완료 → 50 rounds 자동 학습 시작                  │
 │  → 각 라운드: 모델 배포 → 로컬 학습 → 가중치 수집 → 집계     │
