@@ -16,6 +16,10 @@ build/
 fl_clients/
 weights/
 
+# Test temp data
+tests/tmp_*/
+tests/dummy_data/
+
 # IDE
 .vscode/
 .idea/
