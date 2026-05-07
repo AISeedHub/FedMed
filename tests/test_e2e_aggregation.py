@@ -28,7 +28,7 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tests.generate_dummy_data import generate_patient
-from src.use_cases.liver_segmentation.models.segresnet_cirrhosis import build_model
+from src.use_cases.liver_segmentation.models.segresnet_morph import build_model
 from src.use_cases.liver_segmentation.utils.dataset import (
     LiverSeg9Dataset,
     auto_split,
@@ -54,7 +54,6 @@ DEFAULT_CONFIG = {
     "batch_size": 2,
     "learning_rate": 3e-4,
     "weight_decay": 1e-4,
-    "cls_coeff": 0.0,
     "morph_coeff": 0.0,
     "seg_warmup_epochs": 0,
     "num_workers": 0,
@@ -92,12 +91,12 @@ def build_client_loaders(client_dir: str, config: dict):
         val_ids = train_ids[:1]
 
     train_ds = LiverSeg9Dataset(
-        client_dir, train_ids, None,
+        client_dir, train_ids,
         config["image_size"], config["volume_depth"],
         mode="train", num_classes=config["num_classes"],
     )
     val_ds = LiverSeg9Dataset(
-        client_dir, val_ids, None,
+        client_dir, val_ids,
         config["image_size"], config["volume_depth"],
         mode="val", num_classes=config["num_classes"],
     )
@@ -116,21 +115,18 @@ def train_one_epoch(model, optimizer, loader, device, config, scaler=None):
     """Run one local training epoch."""
     model.train()
     total_loss, n = 0.0, 0
-    cc = config.get("cls_coeff", 0.0)
     mc = config.get("morph_coeff", 0.0)
     use_amp = scaler is not None
 
     for batch in loader:
         images = batch["image"].to(device)
         masks = batch["mask"].to(device)
-        cirrhosis = batch["cirrhosis"].to(device)
 
         optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast("cuda", enabled=use_amp):
-            seg_logits, cls_logits, morph_feats, vol_ratios = model(images)
-            loss, sl, cl, ml = compute_loss(
-                seg_logits, cls_logits, morph_feats, vol_ratios,
-                masks, cirrhosis, cc, mc,
+            seg_logits, _morph_feats, vol_ratios = model(images)
+            loss, sl, ml = compute_loss(
+                seg_logits, vol_ratios, masks, mc,
             )
 
         if use_amp:
@@ -262,10 +258,9 @@ def run_test(args):
     images = batch["image"].to(device)
     masks = batch["mask"].to(device)
     with torch.no_grad():
-        seg_logits, cls_logits, morph_feats, vol_ratios = model(images)
+        seg_logits, morph_feats, vol_ratios = model(images)
     print(f"  Input:      {images.shape}")
     print(f"  seg_logits: {seg_logits.shape}")
-    print(f"  cls_logits: {cls_logits.shape}")
     print(f"  morph_feat: {morph_feats.shape}")
     print(f"  vol_ratios: {vol_ratios.shape}")
     assert seg_logits.shape[1] == config["num_classes"]
@@ -275,14 +270,11 @@ def run_test(args):
     print(f"\n{'='*60}")
     print("Step 4: Loss computation check")
     print(f"{'='*60}")
-    cirrhosis = batch["cirrhosis"].to(device)
     with torch.no_grad():
-        loss, sl, cl, ml = compute_loss(
-            seg_logits, cls_logits, morph_feats, vol_ratios,
-            masks, cirrhosis, 0.0, 0.0,
+        loss, sl, ml = compute_loss(
+            seg_logits, vol_ratios, masks, 0.0,
         )
     print(f"  seg_loss:   {sl:.4f}")
-    print(f"  cls_loss:   {cl:.4f}")
     print(f"  morph_loss: {ml:.4f}")
     print(f"  total_loss: {loss.item():.4f}")
     assert not torch.isnan(loss), "Loss is NaN!"

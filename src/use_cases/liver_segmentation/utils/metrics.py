@@ -3,7 +3,6 @@
 import numpy as np
 import torch
 from monai.metrics import DiceMetric, HausdorffDistanceMetric
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 
 @torch.no_grad()
@@ -24,7 +23,7 @@ def compute_per_segment_dice(
         images = batch["image"].to(device)
         masks = batch["mask"]
         with torch.amp.autocast("cuda", enabled=use_amp):
-            seg_logits, _, _, _ = model(images)
+            seg_logits, _, _ = model(images)
         seg_pred = (seg_logits.sigmoid().cpu() > 0.5).float()
         B = images.shape[0]
         for b in range(B):
@@ -59,7 +58,7 @@ def compute_morph_diversity(
     for batch in loader:
         images = batch["image"].to(device)
         with torch.amp.autocast("cuda", enabled=use_amp):
-            _, _, _, vol_ratios = model(images)
+            _, _, vol_ratios = model(images)
         all_vr.append(vol_ratios.cpu())
     if not all_vr:
         return 0.0
@@ -74,9 +73,9 @@ def evaluate(
     device: torch.device,
     num_classes: int = 9,
 ) -> tuple:
-    """Full evaluation: per-segment Dice/HD95, classification, VR error.
+    """Full evaluation: per-segment Dice/HD95 and VR error.
 
-    Returns (dice_per_class, hd95_per_class, cls_metrics_dict, mean_vr_err).
+    Returns (dice_per_class, hd95_per_class, mean_vr_err).
     """
     model.eval()
     dm = DiceMetric(include_background=True, reduction="mean")
@@ -86,18 +85,15 @@ def evaluate(
 
     pcd: list[list[float]] = [[] for _ in range(num_classes)]
     phd: list[list[float]] = [[] for _ in range(num_classes)]
-    cls_preds: list[float] = []
-    cls_labels: list[int] = []
     vr_errors: list[torch.Tensor] = []
 
     use_amp = device.type == "cuda"
     for batch in loader:
         images = batch["image"].to(device)
         masks = batch["mask"]
-        cirrhosis = batch["cirrhosis"]
 
         with torch.amp.autocast("cuda", enabled=use_amp):
-            seg_logits, cls_logits, _morph, vol_ratios = model(images)
+            seg_logits, _morph, vol_ratios = model(images)
 
         seg_pred = (seg_logits.sigmoid().cpu() > 0.5).float()
         pred_vr = vol_ratios.cpu()
@@ -125,11 +121,6 @@ def evaluate(
                 except Exception:
                     pass
 
-            if cirrhosis[b] >= 0:
-                p_val = cls_logits[b].float().sigmoid().cpu().item()
-                cls_preds.append(p_val)
-                cls_labels.append(int(cirrhosis[b].item()))
-
     dv = torch.full((num_classes,), float("nan"))
     hv = torch.full((num_classes,), float("nan"))
     for c in range(num_classes):
@@ -138,26 +129,8 @@ def evaluate(
         if phd[c]:
             hv[c] = np.nanmean(phd[c])
 
-    cls_m: dict[str, float] = {
-        "auc": float("nan"),
-        "acc": float("nan"),
-        "f1": float("nan"),
-    }
-    valid = [
-        (l, p)
-        for l, p in zip(cls_labels, cls_preds)
-        if not (np.isnan(p) or np.isinf(p))
-    ]
-    if len(valid) >= 2:
-        cls_labels_v, cls_preds_v = zip(*valid)
-        if len(set(cls_labels_v)) > 1:
-            cls_m["auc"] = roc_auc_score(cls_labels_v, cls_preds_v)
-        cls_bin = [int(p > 0.5) for p in cls_preds_v]
-        cls_m["acc"] = accuracy_score(cls_labels_v, cls_bin)
-        cls_m["f1"] = f1_score(cls_labels_v, cls_bin, zero_division=0)
-
     mean_vr_err = float("nan")
     if vr_errors:
         mean_vr_err = float(torch.cat(vr_errors).mean().item())
 
-    return dv, hv, cls_m, mean_vr_err
+    return dv, hv, mean_vr_err

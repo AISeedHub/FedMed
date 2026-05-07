@@ -24,7 +24,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from src.fed_core.fed_server import FedFlowerServer
 from src.fed_core.fedmorph_strategy import FedMorphStrategy
-from src.use_cases.liver_segmentation.models.segresnet_cirrhosis import build_model
+from src.use_cases.liver_segmentation.models.segresnet_morph import build_model
 
 
 def load_config(

@@ -351,7 +351,7 @@ src/
   use_cases/liver_segmentation/
     configs/base.yaml        # Training & FL configuration
     models/
-      segresnet_cirrhosis.py # SegResNet + MorphDesc + SegmentFeatureFusion
+      segresnet_morph.py     # SegResNet + MorphologicalDescriptor
     utils/
       dataset.py             # 9-segment liver CT dataset + auto-discover
       loss.py                # Seg + Morph consistency loss

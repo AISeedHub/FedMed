@@ -19,6 +19,7 @@ import argparse
 import json
 import math
 import os
+import platform
 import random
 import sys
 
@@ -35,7 +36,7 @@ from torch.utils.data import DataLoader
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from src.fed_core.fed_client import FedFlowerClient
-from src.use_cases.liver_segmentation.models.segresnet_cirrhosis import build_model
+from src.use_cases.liver_segmentation.models.segresnet_morph import build_model
 from src.use_cases.liver_segmentation.utils.dataset import (
     LiverSeg9Dataset,
     auto_split,
@@ -57,7 +58,7 @@ def _is_norm(name: str) -> bool:
 class LiverSegmentationClient(FedFlowerClient):
     """FedMorph client for 9-segment liver CT segmentation."""
 
-    def __init__(self, client_id: int, config: dict):
+    def __init__(self, client_id: str, config: dict):
         super().__init__(client_id, config)
 
         self.device = torch.device(
@@ -85,17 +86,17 @@ class LiverSegmentationClient(FedFlowerClient):
         nc = config["num_classes"]
 
         self.train_ds = LiverSeg9Dataset(
-            data_dir, train_ids, None,
+            data_dir, train_ids,
             config["image_size"], config["volume_depth"],
             mode="train", num_classes=nc,
         )
         self.val_ds = LiverSeg9Dataset(
-            data_dir, val_ids, None,
+            data_dir, val_ids,
             config["image_size"], config["volume_depth"],
             mode="val", num_classes=nc,
         )
         self.test_ds = LiverSeg9Dataset(
-            data_dir, test_ids, None,
+            data_dir, test_ids,
             config["image_size"], config["volume_depth"],
             mode="val", num_classes=nc,
         )
@@ -231,7 +232,7 @@ class LiverSegmentationClient(FedFlowerClient):
             mc = 0.005 * alpha
         else:
             mc = 0.0
-        local_config = {**config, "morph_coeff": mc, "cls_coeff": 0.0}
+        local_config = {**config, "morph_coeff": mc}
 
         total_loss = 0.0
         for epoch in range(epochs):
@@ -263,7 +264,6 @@ class LiverSegmentationClient(FedFlowerClient):
         total_loss, n = 0.0, 0
 
         warmup = config.get("seg_warmup_epochs", 30)
-        cc = 0.0 if epoch < warmup else config.get("cls_coeff", 0.0)
         mc = 0.0 if epoch < warmup else config.get("morph_coeff", 0.0)
 
         gp = None
@@ -274,16 +274,12 @@ class LiverSegmentationClient(FedFlowerClient):
         for batch in self.train_loader:
             images = batch["image"].to(self.device)
             masks = batch["mask"].to(self.device)
-            cirrhosis = batch["cirrhosis"].to(self.device)
 
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=use_amp):
-                seg_logits, cls_logits, morph_feats, vol_ratios = self.model(
-                    images
-                )
-                loss, _sl, _cl, _ml = compute_loss(
-                    seg_logits, cls_logits, morph_feats, vol_ratios,
-                    masks, cirrhosis, cc, mc,
+                seg_logits, _morph_feats, vol_ratios = self.model(images)
+                loss, _sl, _ml = compute_loss(
+                    seg_logits, vol_ratios, masks, mc,
                 )
 
                 if fedprox_mu > 0 and gp is not None:
@@ -311,7 +307,7 @@ class LiverSegmentationClient(FedFlowerClient):
         return total_loss / max(n, 1)
 
     def evaluate_model(self) -> tuple[float, float, dict]:
-        dv, hv, cls_m, vr_err = evaluate(
+        dv, hv, vr_err = evaluate(
             self.model, self.val_loader, self.device, self.config["num_classes"]
         )
 
@@ -321,15 +317,12 @@ class LiverSegmentationClient(FedFlowerClient):
         metrics = {
             "dice": mean_dice,
             "hd95": float(torch.nanmean(hv).item()),
-            "cls_auc": float(cls_m.get("auc", 0.0)),
-            "cls_acc": float(cls_m.get("acc", 0.0)),
             "vr_err": float(vr_err) if not np.isnan(vr_err) else 0.0,
         }
         print(
             f"[Client {self.client_id}] Eval — "
             f"Dice: {mean_dice:.4f} | "
-            f"AUC: {metrics['cls_auc']:.4f} | "
-            f"Acc: {metrics['cls_acc']:.4f}"
+            f"HD95: {metrics['hd95']:.4f}"
         )
         return loss_proxy, mean_dice, metrics
 
@@ -341,14 +334,13 @@ class LiverSegmentationClient(FedFlowerClient):
         nc = self.config["num_classes"]
         results = {}
 
-        dv, hv, cls_m, vr_err = evaluate(
+        dv, hv, vr_err = evaluate(
             self.model, self.test_loader, self.device, nc,
         )
         results["global"] = {
             "dice": float(torch.nanmean(dv).item()),
             "dice_per_seg": [float(x) for x in dv.tolist()],
             "hd95": float(torch.nanmean(hv).item()),
-            "cls_auc": float(cls_m.get("auc", 0.0)),
             "vr_err": float(vr_err) if not np.isnan(vr_err) else 0.0,
         }
 
@@ -356,14 +348,13 @@ class LiverSegmentationClient(FedFlowerClient):
             self.model.load_state_dict(
                 {k: v.to(self.device) for k, v in self.last_local_state.items()}
             )
-            dv, hv, cls_m, vr_err = evaluate(
+            dv, hv, vr_err = evaluate(
                 self.model, self.test_loader, self.device, nc,
             )
             results["local"] = {
                 "dice": float(torch.nanmean(dv).item()),
                 "dice_per_seg": [float(x) for x in dv.tolist()],
                 "hd95": float(torch.nanmean(hv).item()),
-                "cls_auc": float(cls_m.get("auc", 0.0)),
                 "vr_err": float(vr_err) if not np.isnan(vr_err) else 0.0,
             }
 
@@ -424,8 +415,8 @@ def main():
         description="FedMorph Liver Segmentation — Federated Client"
     )
     parser.add_argument(
-        "--client-id", type=int, default=0,
-        help="Client ID (for logging only, data is auto-discovered)",
+        "--client-id", type=str, default=None,
+        help="Client ID for logging (default: hostname)",
     )
     parser.add_argument(
         "--server-address", type=str, default=None,
@@ -464,13 +455,15 @@ def main():
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
-    print(f"FedMorph - Liver Segmentation Client {args.client_id}")
+    client_id = args.client_id or platform.node()
+
+    print(f"FedMorph - Liver Segmentation Client [{client_id}]")
     print(f"  Method:  {config.get('method', 'FedMorph')}")
     print(f"  Data:    {config['data_dir']}")
     print(f"  Server:  {server_addr}")
     print("=" * 60)
 
-    client = LiverSegmentationClient(args.client_id, config)
+    client = LiverSegmentationClient(client_id, config)
 
     print(f"Connecting to server at {server_addr} ...")
     print("=" * 60)
@@ -484,13 +477,13 @@ def main():
         print("\n[Client] FL training complete. Running final test evaluation...")
         test_results = client.run_final_test()
         _print_final_report(
-            args.client_id, test_results, config["num_classes"],
+            client_id, test_results, config["num_classes"],
         )
 
         out_dir = config.get("output_dir", "outputs")
         os.makedirs(out_dir, exist_ok=True)
         result_path = os.path.join(
-            out_dir, f"test_results_client{args.client_id}.json"
+            out_dir, f"test_results_{client_id}.json"
         )
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(test_results, f, indent=2, ensure_ascii=False)

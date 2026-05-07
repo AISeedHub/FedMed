@@ -62,13 +62,12 @@ def resize_volume(vol: np.ndarray, size: int, is_gt: bool = False) -> np.ndarray
 
 
 class LiverSeg9Dataset(Dataset):
-    """9-segment liver CT volume dataset with cirrhosis labels."""
+    """9-segment liver CT volume dataset."""
 
     def __init__(
         self,
         combined_dir: str,
         patient_ids: list,
-        cirrhosis_dict: dict | None = None,
         image_size: int = 128,
         volume_depth: int = 64,
         mode: str = "train",
@@ -79,8 +78,6 @@ class LiverSeg9Dataset(Dataset):
         self.mode = mode
         self.num_classes = num_classes
         self.samples: list[dict] = []
-        if cirrhosis_dict is None:
-            cirrhosis_dict = {}
 
         for pid in tqdm(patient_ids, desc=f"Building {mode}", leave=False):
             vol_dir = os.path.join(combined_dir, pid)
@@ -91,16 +88,12 @@ class LiverSeg9Dataset(Dataset):
             mask = np.load(mask_path)
             seg9 = mask[1 : num_classes + 1]
             active = [c for c in range(num_classes) if seg9[c].sum() > 0]
-            cirrhosis_label = cirrhosis_dict.get(pid, -1)
-            if isinstance(cirrhosis_label, str):
-                cirrhosis_label = int(cirrhosis_label)
             self.samples.append(
                 {
                     "img_path": img_path,
                     "mask_path": mask_path,
                     "pid": pid,
                     "active_classes": active,
-                    "cirrhosis": cirrhosis_label,
                 }
             )
 
@@ -145,7 +138,6 @@ class LiverSeg9Dataset(Dataset):
         return {
             "image": torch.from_numpy(img_r).float().unsqueeze(0),
             "mask": torch.from_numpy(seg_r.astype(np.float32)),
-            "cirrhosis": torch.tensor(s["cirrhosis"], dtype=torch.float32),
             "pid": s["pid"],
         }
 
@@ -155,6 +147,5 @@ def seg9_collate(batch: list[dict]) -> dict:
     return {
         "image": torch.stack([b["image"] for b in batch]),
         "mask": torch.stack([b["mask"] for b in batch]),
-        "cirrhosis": torch.stack([b["cirrhosis"] for b in batch]),
         "pids": [b["pid"] for b in batch],
     }

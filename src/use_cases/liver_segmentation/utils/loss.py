@@ -23,30 +23,19 @@ def morph_consistency_loss(pred_vol_ratios: torch.Tensor, gt_masks: torch.Tensor
 
 def compute_loss(
     seg_logits: torch.Tensor,
-    cls_logits: torch.Tensor,
-    morph_feats: torch.Tensor,
     vol_ratios: torch.Tensor,
     masks: torch.Tensor,
-    cirrhosis: torch.Tensor,
-    cls_coeff: float,
     morph_coeff: float,
-) -> tuple[torch.Tensor, float, float, float]:
-    """Combined segmentation + classification + morphological loss.
+) -> tuple[torch.Tensor, float, float]:
+    """Combined segmentation + morphological consistency loss.
 
-    Returns (total_loss, seg_loss_val, cls_loss_val, morph_loss_val).
+    Returns (total_loss, seg_loss_val, morph_loss_val).
     """
     bce_seg = nn.BCEWithLogitsLoss()(seg_logits, masks)
     dl = dice_loss_fn(seg_logits, masks)
     seg_loss = bce_seg + dl
 
-    cls_loss = torch.tensor(0.0, device=seg_logits.device)
-    valid = cirrhosis >= 0
-    if valid.any():
-        cls_loss = nn.BCEWithLogitsLoss()(
-            cls_logits[valid].squeeze(-1), cirrhosis[valid]
-        )
-
     m_loss = morph_consistency_loss(vol_ratios, masks)
 
-    total = seg_loss + cls_coeff * cls_loss + morph_coeff * m_loss
-    return total, seg_loss.item(), cls_loss.item(), m_loss.item()
+    total = seg_loss + morph_coeff * m_loss
+    return total, seg_loss.item(), m_loss.item()
