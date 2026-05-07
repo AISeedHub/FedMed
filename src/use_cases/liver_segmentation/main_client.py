@@ -137,10 +137,11 @@ class LiverSegmentationClient(FedFlowerClient):
         self.current_round = 0
         self.last_local_state: OrderedDict | None = None
 
+        total_patients = len(train_ids) + len(val_ids) + len(test_ids)
         print(f"[Client {client_id}] Device: {self.device}")
         print(f"[Client {client_id}] Data: {data_dir}")
         print(
-            f"[Client {client_id}] Patients: {len(all_pids)} total "
+            f"[Client {client_id}] Patients: {total_patients} total "
             f"(train {len(self.train_ds)}, val {len(self.val_ds)}, "
             f"test {len(self.test_ds)})"
         )
