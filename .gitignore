@@ -20,6 +20,9 @@ weights/
 tests/tmp_*/
 tests/dummy_data/
 
+# Output results
+outputs/
+
 # IDE
 .vscode/
 .idea/

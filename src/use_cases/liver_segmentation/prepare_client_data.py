@@ -82,7 +82,8 @@ def main():
         help="Path to local CT data directory",
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--train-ratio", type=float, default=0.85)
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument("--val-ratio", type=float, default=0.15)
     args = parser.parse_args()
 
     print("=" * 60)
@@ -114,14 +115,21 @@ def main():
 
     print(f"\nValidation: {ok_count} OK, {warn_count} with issues")
 
-    train_ids, val_ids = auto_split(pids, args.train_ratio, args.seed)
+    train_ids, val_ids, test_ids = auto_split(
+        pids, args.train_ratio, args.val_ratio, args.seed,
+    )
 
     print(f"\n{'=' * 60}")
-    print("Train/Val Split Preview")
+    print("Train/Val/Test Split Preview")
     print(f"{'=' * 60}")
     print(f"  Train: {len(train_ids)} patients")
     print(f"  Val:   {len(val_ids)} patients")
-    print(f"  Ratio: {len(train_ids)/len(pids):.0%} / {len(val_ids)/len(pids):.0%}")
+    print(f"  Test:  {len(test_ids)} patients")
+    print(
+        f"  Ratio: {len(train_ids)/len(pids):.0%} / "
+        f"{len(val_ids)/len(pids):.0%} / "
+        f"{len(test_ids)/len(pids):.0%}"
+    )
 
     print(f"\n{'=' * 60}")
     print("Ready for Federated Learning")

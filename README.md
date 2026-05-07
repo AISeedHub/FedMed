@@ -77,7 +77,27 @@ D:\data\liver_ct\               ← 각 병원의 로컬 경로
 
 ### Step 1. 환경 설치 (모든 PC)
 
-**1-1. uv 설치 (최초 1회)**
+**1-1. Python 설치 (최초 1회)**
+
+Python 3.11 또는 3.12를 설치합니다. (3.13은 일부 라이브러리 호환 문제가 있을 수 있습니다)
+
+- **Windows**: https://www.python.org/downloads/ 에서 다운로드
+  - 설치 시 **"Add Python to PATH"** 반드시 체크
+- **Linux**: `sudo apt install python3.11 python3.11-venv` (Ubuntu/Debian)
+- **macOS**: `brew install python@3.11`
+
+설치 확인:
+```bash
+python --version   # Python 3.11.x 또는 3.12.x
+```
+
+**1-2. Git 설치 (최초 1회)**
+
+- **Windows**: https://git-scm.com/download/win 에서 다운로드 → 기본값으로 설치
+- **Linux**: `sudo apt install git`
+- **macOS**: `brew install git`
+
+**1-3. uv 설치 (최초 1회)**
 
 ```powershell
 # Windows PowerShell
@@ -89,7 +109,9 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-**1-2. 프로젝트 클론 & 의존성 설치**
+> 설치 후 터미널을 **재시작**해야 `uv` 명령이 인식됩니다.
+
+**1-4. 프로젝트 클론 & 의존성 설치**
 
 ```bash
 git clone https://github.com/AISeedHub/FedMed.git

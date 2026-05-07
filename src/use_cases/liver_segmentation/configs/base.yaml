@@ -27,7 +27,8 @@ weight_decay: 1.0e-4
 cls_coeff: 0.0            # classification loss weight (disabled)
 morph_coeff: 0.005        # max morph loss weight (applied only in late rounds)
 seg_warmup_epochs: 30     # epochs before enabling cls / morph loss
-train_ratio: 0.85         # train/val split ratio (auto-split on each client)
+train_ratio: 0.70         # train/val/test split ratios (auto-split on each client)
+val_ratio: 0.15
 seed: 42
 
 # Windows: keep num_workers=0 to avoid multiprocessing issues.

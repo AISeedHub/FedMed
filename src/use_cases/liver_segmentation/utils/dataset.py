@@ -27,15 +27,20 @@ def discover_patients(data_dir: str) -> list[str]:
 
 def auto_split(
     patient_ids: list[str],
-    train_ratio: float = 0.85,
+    train_ratio: float = 0.70,
+    val_ratio: float = 0.15,
     seed: int = 42,
-) -> tuple[list[str], list[str]]:
-    """Split patient IDs into train / val sets."""
+) -> tuple[list[str], list[str], list[str]]:
+    """Split patient IDs into train / val / test sets."""
     rng = random.Random(seed)
     ids = list(patient_ids)
     rng.shuffle(ids)
-    n_train = max(1, int(round(len(ids) * train_ratio)))
-    return ids[:n_train], ids[n_train:]
+    n = len(ids)
+    n_train = max(1, int(round(n * train_ratio)))
+    n_val = max(1, int(round(n * val_ratio)))
+    if n_train + n_val >= n:
+        n_val = max(1, n - n_train - 1)
+    return ids[:n_train], ids[n_train : n_train + n_val], ids[n_train + n_val :]
 
 
 def resize_volume(vol: np.ndarray, size: int, is_gt: bool = False) -> np.ndarray:

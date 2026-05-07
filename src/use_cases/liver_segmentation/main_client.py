@@ -76,9 +76,10 @@ class LiverSegmentationClient(FedFlowerClient):
                 "Each subfolder must contain image.npy and mask.npy."
             )
 
-        train_ids, val_ids = auto_split(
+        train_ids, val_ids, test_ids = auto_split(
             all_pids,
-            train_ratio=config.get("train_ratio", 0.85),
+            train_ratio=config.get("train_ratio", 0.70),
+            val_ratio=config.get("val_ratio", 0.15),
             seed=config.get("seed", 42),
         )
         nc = config["num_classes"]
@@ -90,6 +91,11 @@ class LiverSegmentationClient(FedFlowerClient):
         )
         self.val_ds = LiverSeg9Dataset(
             data_dir, val_ids, None,
+            config["image_size"], config["volume_depth"],
+            mode="val", num_classes=nc,
+        )
+        self.test_ds = LiverSeg9Dataset(
+            data_dir, test_ids, None,
             config["image_size"], config["volume_depth"],
             mode="val", num_classes=nc,
         )
@@ -106,6 +112,11 @@ class LiverSegmentationClient(FedFlowerClient):
             num_workers=nw, collate_fn=seg9_collate,
             pin_memory=pin,
         )
+        self.test_loader = DataLoader(
+            self.test_ds, batch_size=config["batch_size"], shuffle=False,
+            num_workers=nw, collate_fn=seg9_collate,
+            pin_memory=pin,
+        )
 
         # ── Mixed precision (CUDA only) ──
         self.scaler = (
@@ -116,12 +127,14 @@ class LiverSegmentationClient(FedFlowerClient):
         self.local_norm_state: OrderedDict | None = None
         self.global_params_for_prox: dict | None = None
         self.current_round = 0
+        self.last_local_state: OrderedDict | None = None
 
         print(f"[Client {client_id}] Device: {self.device}")
         print(f"[Client {client_id}] Data: {data_dir}")
         print(
             f"[Client {client_id}] Patients: {len(all_pids)} total "
-            f"(train {len(self.train_ds)}, val {len(self.val_ds)})"
+            f"(train {len(self.train_ds)}, val {len(self.val_ds)}, "
+            f"test {len(self.test_ds)})"
         )
 
     # ------------------------------------------------------------------
@@ -168,6 +181,10 @@ class LiverSegmentationClient(FedFlowerClient):
             "local_epochs", self.config.get("local_epochs", 10)
         )
         train_metrics = self.train_model(epochs)
+
+        self.last_local_state = OrderedDict(
+            (k, v.cpu().clone()) for k, v in self.model.state_dict().items()
+        )
 
         method = self.config.get("method", "FedMorph")
         if method == "FedMorph":
@@ -319,6 +336,80 @@ class LiverSegmentationClient(FedFlowerClient):
     def _get_dataset_size(self) -> int:
         return len(self.train_ds)
 
+    def run_final_test(self) -> dict:
+        """Run test-set evaluation with both the global and local models."""
+        nc = self.config["num_classes"]
+        results = {}
+
+        dv, hv, cls_m, vr_err = evaluate(
+            self.model, self.test_loader, self.device, nc,
+        )
+        results["global"] = {
+            "dice": float(torch.nanmean(dv).item()),
+            "dice_per_seg": [float(x) for x in dv.tolist()],
+            "hd95": float(torch.nanmean(hv).item()),
+            "cls_auc": float(cls_m.get("auc", 0.0)),
+            "vr_err": float(vr_err) if not np.isnan(vr_err) else 0.0,
+        }
+
+        if self.last_local_state is not None:
+            self.model.load_state_dict(
+                {k: v.to(self.device) for k, v in self.last_local_state.items()}
+            )
+            dv, hv, cls_m, vr_err = evaluate(
+                self.model, self.test_loader, self.device, nc,
+            )
+            results["local"] = {
+                "dice": float(torch.nanmean(dv).item()),
+                "dice_per_seg": [float(x) for x in dv.tolist()],
+                "hd95": float(torch.nanmean(hv).item()),
+                "cls_auc": float(cls_m.get("auc", 0.0)),
+                "vr_err": float(vr_err) if not np.isnan(vr_err) else 0.0,
+            }
+
+        return results
+
+
+def _print_final_report(client_id: int, results: dict, num_classes: int):
+    """Print a formatted comparison table of global vs local model on test set."""
+    sep = "=" * 72
+    print(f"\n{sep}")
+    print(f"  FINAL TEST RESULTS — Client {client_id}")
+    print(sep)
+
+    header = f"{'Metric':<20} {'Global (Aggregated)':>22} {'Local (Last Train)':>22}"
+    print(header)
+    print("-" * 72)
+
+    g = results.get("global", {})
+    l = results.get("local", {})
+
+    rows = [
+        ("Dice (mean)", g.get("dice", float("nan")), l.get("dice", float("nan"))),
+        ("HD95 (mean)", g.get("hd95", float("nan")), l.get("hd95", float("nan"))),
+        ("VR Error", g.get("vr_err", float("nan")), l.get("vr_err", float("nan"))),
+    ]
+    for name, gv, lv in rows:
+        print(f"  {name:<18} {gv:>22.4f} {lv:>22.4f}")
+
+    print("-" * 72)
+    print(f"  {'Per-Segment Dice':<18}")
+    g_segs = g.get("dice_per_seg", [])
+    l_segs = l.get("dice_per_seg", [])
+    for c in range(num_classes):
+        gv = g_segs[c] if c < len(g_segs) else float("nan")
+        lv = l_segs[c] if c < len(l_segs) else float("nan")
+        print(f"    Seg {c + 1:<13} {gv:>22.4f} {lv:>22.4f}")
+
+    print(sep)
+    g_dice = g.get("dice", 0)
+    l_dice = l.get("dice", 0)
+    if g_dice >= l_dice:
+        print("  >> Global model wins (federated aggregation is effective)")
+    else:
+        print("  >> Local model wins (local data distribution advantage)")
+    print(sep + "\n")
+
 
 # ======================================================================
 # Entry point
@@ -387,6 +478,25 @@ def main():
     fl.client.start_numpy_client(
         server_address=server_addr, client=client,
     )
+
+    # ── Final test evaluation after FL completes ──
+    if len(client.test_ds) > 0:
+        print("\n[Client] FL training complete. Running final test evaluation...")
+        test_results = client.run_final_test()
+        _print_final_report(
+            args.client_id, test_results, config["num_classes"],
+        )
+
+        out_dir = config.get("output_dir", "outputs")
+        os.makedirs(out_dir, exist_ok=True)
+        result_path = os.path.join(
+            out_dir, f"test_results_client{args.client_id}.json"
+        )
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(test_results, f, indent=2, ensure_ascii=False)
+        print(f"[Client] Test results saved to {result_path}")
+    else:
+        print("\n[Client] No test data available, skipping final evaluation.")
 
 
 if __name__ == "__main__":

@@ -85,8 +85,8 @@ def build_client_loaders(client_dir: str, config: dict):
 
     pids = discover_patients(client_dir)
     assert len(pids) > 0, f"No patients found in {client_dir}"
-    train_ids, val_ids = auto_split(
-        pids, config["train_ratio"], config["seed"]
+    train_ids, val_ids, _test_ids = auto_split(
+        pids, config["train_ratio"], config.get("val_ratio", 0.15), config["seed"]
     )
     if not val_ids:
         val_ids = train_ids[:1]
