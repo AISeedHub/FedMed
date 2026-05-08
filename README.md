@@ -140,10 +140,10 @@ uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patien
 
 ```bash
 # 서버
-uv run python src/use_cases/liver_segmentation/benchmark_server.py
+uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg FedProx FedBN FedMorph
 
 # 각 클라이언트
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/benchmark_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data --methods FedAvg FedProx FedBN FedMorph
 ```
 
 ### Step 3. 클라이언트 준비 상태 확인
@@ -210,20 +210,25 @@ src\run_liver_server.bat
 또는 직접:
 
 ```bash
+# 단일 방법론 (config 기본값)
 uv run python src/use_cases/liver_segmentation/main_server.py
+
+# 여러 방법론 순차 실행 (벤치마크)
+uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg FedProx FedBN FedMorph
 ```
 
 서버가 시작되면:
 
 ```
-FedMorph - Liver Segmentation Server
 ============================================================
-  Method:       FedMorph
-  Rounds:       50
-  Min Clients:  3
+  FedMorph - Liver Segmentation Server
 ============================================================
-Listening on 0.0.0.0:9000
-Waiting for 3 clients to connect ...
+  Methods:     FedAvg, FedProx, FedBN, FedMorph
+  Rounds/method: 50
+  Min Clients: 3
+============================================================
+  [1/4] Starting method: FedAvg
+  Waiting for 3 clients to connect...
 ```
 
 ### Step 5. 클라이언트 실행 (각 병원 PC)
@@ -241,10 +246,20 @@ src\run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct
 또는 직접:
 
 ```bash
+# 단일 방법론 (config 기본값)
 uv run python src/use_cases/liver_segmentation/main_client.py \
     --server-address 192.168.1.100:9000 \
     --data-dir D:\data\liver_ct
+
+# 여러 방법론 순차 참여 (서버와 동일한 --methods 순서로 지정)
+uv run python src/use_cases/liver_segmentation/main_client.py \
+    --server-address 192.168.1.100:9000 \
+    --data-dir D:\data\liver_ct \
+    --methods FedAvg FedProx FedBN FedMorph
 ```
+
+> `--methods`를 사용하면 데이터 split이 한 번만 수행되어 모든 방법론에서 동일하게 적용됩니다.
+> 서버 method 전환 시 접속이 끊겨도 클라이언트가 자동으로 재시도합니다 (최대 2분).
 
 **데이터 경로 지정 방법 (우선순위 순):**
 
@@ -298,15 +313,27 @@ Metric               Global (Aggregated)   Local (Last Train)
 
 4가지 FL 방법론(FedAvg, FedProx, FedBN, FedMorph)을 순차 실행하여 비교합니다.
 
-**서버:**
+**방법 1: main_server/client.py 사용 (권장)**
 
 ```bash
-uv run python src/use_cases/liver_segmentation/benchmark_server.py
+# 서버
+uv run python src/use_cases/liver_segmentation/main_server.py \
+    --methods FedAvg FedProx FedBN FedMorph
+
+# 각 클라이언트
+uv run python src/use_cases/liver_segmentation/main_client.py \
+    --server-address 192.168.1.100:9000 \
+    --data-dir D:\data\liver_ct \
+    --methods FedAvg FedProx FedBN FedMorph
 ```
 
-**각 클라이언트:**
+**방법 2: benchmark_server/client.py 사용 (동일 기능)**
 
 ```bash
+# 서버
+uv run python src/use_cases/liver_segmentation/benchmark_server.py
+
+# 각 클라이언트
 uv run python src/use_cases/liver_segmentation/benchmark_client.py \
     --server-address 192.168.1.100:9000 \
     --data-dir D:\data\liver_ct
@@ -421,10 +448,10 @@ src/
       dataset.py               # 9-segment liver CT dataset + auto-discover
       loss.py                  # Seg + Morph consistency loss
       metrics.py               # Dice / HD95 evaluation
-    main_server.py             # Single-method server
-    main_client.py             # Single-method client
-    benchmark_server.py        # Multi-method benchmark server
-    benchmark_client.py        # Multi-method benchmark client
+    main_server.py             # FL server (single or multi-method via --methods)
+    main_client.py             # FL client (single or multi-method via --methods)
+    benchmark_server.py        # Multi-method benchmark server (alternative)
+    benchmark_client.py        # Multi-method benchmark client (alternative)
     check_ready.py             # Client readiness check (deps, GPU, data, server)
     prepare_client_data.py     # Local data validation tool
   run_liver_server.bat/.sh     # Server launch scripts

@@ -5,26 +5,33 @@ FedMorph Liver Segmentation — Federated Server
 Starts the Flower gRPC server with FedMorph aggregation strategy.
 Waits for ``min_clients`` to connect, then runs ``fl_rounds`` rounds.
 
+Supports running multiple methods sequentially via --methods flag:
+  python main_server.py --methods FedAvg FedProx FedBN FedMorph
+
 Usage:
   python main_server.py
   python main_server.py --config configs/base.yaml
+  python main_server.py --methods FedAvg FedMorph
 """
 
 import argparse
 import math
 import os
 import sys
+import time
 
 os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 
+import flwr as fl
 import torch
 import yaml
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from src.fed_core.fed_server import FedFlowerServer
 from src.fed_core.fedmorph_strategy import FedMorphStrategy
 from src.use_cases.liver_segmentation.models.segresnet_morph import build_model
+
+ALL_METHODS = ["FedAvg", "FedProx", "FedBN", "FedMorph"]
 
 
 def load_config(
@@ -43,34 +50,11 @@ def get_model_state_keys(config: dict) -> list[str]:
     return keys
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="FedMorph Liver Segmentation — Federated Server"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="src/use_cases/liver_segmentation/configs/base.yaml",
-    )
-    args = parser.parse_args()
-
-    config = load_config(args.config)
-    method = config.get("method", "FedMorph")
+def run_one_method(method, config, model_keys, server_address):
+    """Run a single FL method for fl_rounds."""
     fl_rounds = config["fl_rounds"]
     min_clients = config["min_clients"]
     local_epochs = config["local_epochs"]
-
-    print("FedMorph - Liver Segmentation Server")
-    print("=" * 60)
-    print(f"  Method:       {method}")
-    print(f"  Rounds:       {fl_rounds}")
-    print(f"  Min Clients:  {min_clients}")
-    print(f"  Local Epochs: {local_epochs}")
-    print(f"  Model:        SegResNetWithCirrhosis "
-          f"(filters={config['init_filters']})")
-
-    model_keys = get_model_state_keys(config)
-    print(f"  Param tensors: {len(model_keys)}")
 
     def fit_config_fn(server_round: int) -> dict:
         lr_scale = 0.5 * (1 + math.cos(math.pi * server_round / fl_rounds))
@@ -106,18 +90,78 @@ def main():
         evaluate_metrics_aggregation_fn=evaluate_metrics_agg_fn,
     )
 
-    server = FedFlowerServer(
-        num_rounds=fl_rounds,
-        min_clients=min_clients,
+    fl.server.start_server(
+        server_address=server_address,
+        config=fl.server.ServerConfig(num_rounds=fl_rounds),
         strategy=strategy,
-        config=config,
     )
 
-    print("=" * 60)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="FedMorph Liver Segmentation — Federated Server"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="src/use_cases/liver_segmentation/configs/base.yaml",
+    )
+    parser.add_argument(
+        "--methods", nargs="+", default=None,
+        choices=ALL_METHODS,
+        help="Methods to run sequentially (default: single method from config)",
+    )
+    args = parser.parse_args()
+
+    config = load_config(args.config)
     server_address = config.get("server_address", "0.0.0.0:9000")
-    print(f"Listening on {server_address}")
-    print(f"Waiting for {min_clients} clients to connect ...")
-    server.start(server_address)
+    model_keys = get_model_state_keys(config)
+
+    if args.methods:
+        methods = args.methods
+    else:
+        methods = [config.get("method", "FedMorph")]
+
+    total = len(methods)
+
+    print("=" * 60)
+    print("  FedMorph - Liver Segmentation Server")
+    print("=" * 60)
+    print(f"  Methods:     {', '.join(methods)}")
+    print(f"  Rounds/method: {config['fl_rounds']}")
+    print(f"  Min Clients: {config['min_clients']}")
+    print(f"  Local Epochs: {config['local_epochs']}")
+    print(f"  Model:        SegResNetMorph "
+          f"(filters={config['init_filters']})")
+    print(f"  Param tensors: {len(model_keys)}")
+    print(f"  Address:     {server_address}")
+    print("=" * 60)
+
+    for i, method in enumerate(methods, 1):
+        print(f"\n{'#' * 60}")
+        print(f"  [{i}/{total}] Starting method: {method}")
+        print(f"{'#' * 60}")
+        print(f"  Waiting for {config['min_clients']} clients to connect...")
+
+        t0 = time.time()
+        run_one_method(method, config, model_keys, server_address)
+        elapsed = time.time() - t0
+
+        print(f"\n  [{i}/{total}] {method} completed in {elapsed:.0f}s")
+
+        if i < total:
+            wait = 10
+            print(f"  Next method in {wait}s... "
+                  f"(clients will auto-reconnect)")
+            time.sleep(wait)
+
+    print(f"\n{'=' * 60}")
+    if total > 1:
+        print("  All methods complete!")
+        print(f"  Methods tested: {', '.join(methods)}")
+    else:
+        print(f"  {methods[0]} complete!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

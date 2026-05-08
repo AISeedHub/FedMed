@@ -50,6 +50,25 @@ from src.use_cases.liver_segmentation.utils.dataset import (
 ALL_METHODS = ["FedAvg", "FedProx", "FedBN", "FedMorph"]
 
 
+def _connect_with_retry(server_addr, client, max_retries=12, interval=10):
+    """Try connecting to the FL server with retries (handles server restart gap)."""
+    import grpc
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            fl.client.start_numpy_client(
+                server_address=server_addr, client=client,
+            )
+            return
+        except grpc._channel._MultiThreadedRendezvous as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and attempt < max_retries:
+                print(f"  [Retry {attempt}/{max_retries}] Server not ready, "
+                      f"retrying in {interval}s...")
+                time.sleep(interval)
+            else:
+                raise
+
+
 def run_one_method(method, config, client_id, server_addr, out_dir, split):
     """Run a single FL method and return test results."""
     method_config = {**config, "method": method}
@@ -57,9 +76,7 @@ def run_one_method(method, config, client_id, server_addr, out_dir, split):
     client = LiverSegmentationClient(client_id, method_config, split=split)
 
     print(f"  Connecting to server at {server_addr} ...")
-    fl.client.start_numpy_client(
-        server_address=server_addr, client=client,
-    )
+    _connect_with_retry(server_addr, client)
 
     results = {"method": method}
 

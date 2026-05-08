@@ -5,14 +5,18 @@ FedMorph Liver Segmentation — Federated Client
 Each hospital PC runs one instance of this client.
 The client:
   1. Scans its local data directory for CT volumes (image.npy + mask.npy)
-  2. Auto-splits into train/val sets
+  2. Auto-splits into train/val/test sets
   3. Receives global model from the server, trains locally
   4. Returns updated model weights + seg quality metrics to server
+
+Supports running multiple methods sequentially via --methods flag:
+  python main_client.py --server-address IP:9000 --data-dir ./data --methods FedAvg FedProx FedBN FedMorph
 
 No central data distribution needed — each site only accesses its own data.
 
 Usage:
   python main_client.py --data-dir D:\\data\\liver_ct --server-address 192.168.1.100:9000
+  python main_client.py --server-address 192.168.1.100:9000 --data-dir ./data --methods FedAvg FedMorph
 """
 
 import argparse
@@ -22,6 +26,7 @@ import os
 import platform
 import random
 import sys
+import time
 
 os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 
@@ -49,6 +54,8 @@ from src.use_cases.liver_segmentation.utils.metrics import (
     compute_per_segment_dice,
     evaluate,
 )
+
+ALL_METHODS = ["FedAvg", "FedProx", "FedBN", "FedMorph"]
 
 
 def _is_norm(name: str) -> bool:
@@ -418,6 +425,101 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def _connect_with_retry(server_addr, client, max_retries=12, interval=10):
+    """Try connecting to the FL server with retries (handles server restart gap)."""
+    import grpc
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            fl.client.start_numpy_client(
+                server_address=server_addr, client=client,
+            )
+            return
+        except grpc._channel._MultiThreadedRendezvous as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and attempt < max_retries:
+                print(f"  [Retry {attempt}/{max_retries}] Server not ready, "
+                      f"retrying in {interval}s...")
+                time.sleep(interval)
+            else:
+                raise
+
+
+def _run_one_method_and_save(method, config, client_id, server_addr, out_dir, split):
+    """Run one FL method, save models and test results. Returns result dict."""
+    method_config = {**config, "method": method}
+    client = LiverSegmentationClient(client_id, method_config, split=split)
+
+    print(f"  Connecting to server at {server_addr} ...")
+    _connect_with_retry(server_addr, client)
+
+    results = {"method": method}
+
+    # Save models
+    os.makedirs(out_dir, exist_ok=True)
+    suffix = f"{method}_{client_id}" if len(config.get("_methods", [])) > 1 else client_id
+
+    global_path = os.path.join(out_dir, f"global_model_{suffix}.pth")
+    torch.save(client.model.state_dict(), global_path)
+    print(f"\n[Client] Global model saved to {global_path}")
+
+    if client.last_local_state is not None:
+        local_path = os.path.join(out_dir, f"local_model_{suffix}.pth")
+        torch.save(client.last_local_state, local_path)
+        print(f"[Client] Local model saved to {local_path}")
+
+    if len(client.test_ds) > 0:
+        print("[Client] Running final test evaluation...")
+        test_results = client.run_final_test()
+        results.update(test_results)
+        _print_final_report(client_id, test_results, config["num_classes"])
+
+        result_path = os.path.join(out_dir, f"test_results_{suffix}.json")
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(test_results, f, indent=2, ensure_ascii=False)
+        print(f"[Client] Test results saved to {result_path}")
+    else:
+        print("\n[Client] No test data available, skipping final evaluation.")
+
+    del client
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return results
+
+
+def _print_multi_method_summary(all_results, client_id):
+    """Print a comparison table across all methods."""
+    sep = "=" * 72
+    print(f"\n{sep}")
+    print(f"  BENCHMARK SUMMARY — Client [{client_id}]")
+    print(sep)
+
+    header = f"  {'Method':<12} {'Dice (G)':>10} {'Dice (L)':>10} {'HD95 (G)':>10} {'HD95 (L)':>10}"
+    print(header)
+    print("-" * 72)
+
+    for r in all_results:
+        method = r.get("method", "?")
+        g = r.get("global", {})
+        loc = r.get("local", {})
+        g_dice = g.get("dice", float("nan"))
+        l_dice = loc.get("dice", float("nan"))
+        g_hd = g.get("hd95", float("nan"))
+        l_hd = loc.get("hd95", float("nan"))
+        marker = " *" if method == "FedMorph" else ""
+        print(f"  {method + marker:<12} {g_dice:>10.4f} {l_dice:>10.4f} "
+              f"{g_hd:>10.2f} {l_hd:>10.2f}")
+
+    print(sep)
+
+    global_dices = [(r["method"], r.get("global", {}).get("dice", 0))
+                    for r in all_results]
+    if global_dices:
+        best = max(global_dices, key=lambda x: x[1])
+        print(f"  Best global Dice: {best[0]} ({best[1]:.4f})")
+    print(sep + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="FedMorph Liver Segmentation — Federated Client"
@@ -437,6 +539,11 @@ def main():
     parser.add_argument(
         "--data-dir", type=str, default=None,
         help="Local CT data directory (overrides config)",
+    )
+    parser.add_argument(
+        "--methods", nargs="+", default=None,
+        choices=ALL_METHODS,
+        help="Methods to run sequentially (default: single method from config)",
     )
     args = parser.parse_args()
 
@@ -465,47 +572,67 @@ def main():
 
     client_id = args.client_id or platform.node()
 
-    print(f"FedMorph - Liver Segmentation Client [{client_id}]")
-    print(f"  Method:  {config.get('method', 'FedMorph')}")
-    print(f"  Data:    {config['data_dir']}")
-    print(f"  Server:  {server_addr}")
-    print("=" * 60)
-
-    client = LiverSegmentationClient(client_id, config)
-
-    print(f"Connecting to server at {server_addr} ...")
-    print("=" * 60)
-
-    fl.client.start_numpy_client(
-        server_address=server_addr, client=client,
-    )
-
-    # ── Save models & run final test after FL completes ──
-    out_dir = config.get("output_dir", "outputs")
-    os.makedirs(out_dir, exist_ok=True)
-
-    global_path = os.path.join(out_dir, f"global_model_{client_id}.pth")
-    torch.save(client.model.state_dict(), global_path)
-    print(f"\n[Client] Global (aggregated) model saved to {global_path}")
-
-    if client.last_local_state is not None:
-        local_path = os.path.join(out_dir, f"local_model_{client_id}.pth")
-        torch.save(client.last_local_state, local_path)
-        print(f"[Client] Local (last trained) model saved to {local_path}")
-
-    if len(client.test_ds) > 0:
-        print("[Client] Running final test evaluation...")
-        test_results = client.run_final_test()
-        _print_final_report(
-            client_id, test_results, config["num_classes"],
-        )
-
-        result_path = os.path.join(out_dir, f"test_results_{client_id}.json")
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(test_results, f, indent=2, ensure_ascii=False)
-        print(f"[Client] Test results saved to {result_path}")
+    if args.methods:
+        methods = args.methods
     else:
-        print("\n[Client] No test data available, skipping final evaluation.")
+        methods = [config.get("method", "FedMorph")]
+
+    config["_methods"] = methods
+
+    # ── Data split: computed ONCE, shared across all methods ──
+    data_dir = config["data_dir"]
+    all_pids = discover_patients(data_dir)
+    if not all_pids:
+        raise RuntimeError(
+            f"No patients found in {data_dir}. "
+            "Each subfolder must contain image.npy and mask.npy."
+        )
+    train_ids, val_ids, test_ids = auto_split(
+        all_pids,
+        train_ratio=config.get("train_ratio", 0.70),
+        val_ratio=config.get("val_ratio", 0.15),
+        seed=config.get("seed", 42),
+    )
+    split = (train_ids, val_ids, test_ids)
+    total = len(methods)
+
+    print("=" * 60)
+    print(f"  FedMorph - Liver Segmentation Client [{client_id}]")
+    print("=" * 60)
+    print(f"  Methods:  {', '.join(methods)}")
+    print(f"  Data:     {data_dir}")
+    print(f"  Patients: {len(all_pids)} total "
+          f"(train {len(train_ids)}, val {len(val_ids)}, test {len(test_ids)})")
+    print(f"  Server:   {server_addr}")
+    if total > 1:
+        print(f"  Split is FIXED across all methods (seed={seed})")
+    print("=" * 60)
+
+    out_dir = config.get("output_dir", "outputs")
+
+    all_results = []
+    for i, method in enumerate(methods, 1):
+        print(f"\n{'#' * 60}")
+        print(f"  [{i}/{total}] Method: {method}")
+        print(f"{'#' * 60}")
+
+        results = _run_one_method_and_save(
+            method, config, client_id, server_addr, out_dir, split,
+        )
+        all_results.append(results)
+
+        if i < total:
+            wait = 5
+            print(f"\n  Next method in {wait}s...")
+            time.sleep(wait)
+
+    if total > 1:
+        _print_multi_method_summary(all_results, client_id)
+
+        summary_path = os.path.join(out_dir, f"benchmark_{client_id}.json")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(all_results, f, indent=2, ensure_ascii=False)
+        print(f"[Client] Benchmark results saved to {summary_path}")
 
 
 if __name__ == "__main__":
