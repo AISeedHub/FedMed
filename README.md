@@ -133,16 +133,8 @@ uv run python src/use_cases/liver_segmentation/main_server.py \
     --config src/use_cases/liver_segmentation/configs/test.yaml \
     --methods FedAvg FedProx FedBN FedMorph
 
-# 각 클라이언트 (준비 확인 → 더미 데이터 생성 → 테스트 학습)
-uv run python src/use_cases/liver_segmentation/check_ready.py \
-    --data-dir tests/dummy_data \
-    --server-address 192.168.1.100:443 && \
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && \
-uv run python src/use_cases/liver_segmentation/main_client.py \
-    --config src/use_cases/liver_segmentation/configs/test.yaml \
-    --server-address 192.168.1.100:443 \
-    --data-dir tests/dummy_data \
-    --methods FedAvg FedProx FedBN FedMorph
+# 각 클라이언트 (준비 확인 → 더미 데이터 생성 → 테스트 학습, 한 줄로 실행)
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:443 && uv run python src/use_cases/liver_segmentation/main_client.py --config src/use_cases/liver_segmentation/configs/test.yaml --server-address 192.168.1.100:443 --data-dir tests/dummy_data --methods FedAvg FedProx FedBN FedMorph
 ```
 
 클라이언트 실행 시 아래 항목이 자동으로 확인됩니다:
