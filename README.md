@@ -124,7 +124,7 @@ uv sync
 
 ### Step 2. 더미 데이터로 사전 테스트 (선택)
 
-실제 데이터 없이 통신 및 전체 파이프라인이 정상인지 빠르게 검증합니다.
+실제 데이터 없이 환경, 통신, 전체 파이프라인을 빠르게 검증합니다.
 테스트용 config(`configs/test.yaml`)를 사용하면 2라운드 × 2에폭으로 빠르게 끝납니다.
 
 ```bash
@@ -133,7 +133,10 @@ uv run python src/use_cases/liver_segmentation/main_server.py \
     --config src/use_cases/liver_segmentation/configs/test.yaml \
     --methods FedAvg FedProx FedBN FedMorph
 
-# 각 클라이언트 (더미 데이터 생성 → 테스트 학습)
+# 각 클라이언트 (준비 확인 → 더미 데이터 생성 → 테스트 학습)
+uv run python src/use_cases/liver_segmentation/check_ready.py \
+    --data-dir tests/dummy_data \
+    --server-address 192.168.1.100:443 && \
 uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && \
 uv run python src/use_cases/liver_segmentation/main_client.py \
     --config src/use_cases/liver_segmentation/configs/test.yaml \
@@ -142,59 +145,20 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
     --methods FedAvg FedProx FedBN FedMorph
 ```
 
+클라이언트 실행 시 아래 항목이 자동으로 확인됩니다:
+
+```
+[1/4] Dependencies  — torch, monai, flwr 등
+[2/4] GPU           — CUDA, VRAM 크기
+[3/4] Local Data    — 환자 폴더 구조 검증
+[4/4] Server        — TCP 포트 + gRPC 통신
+```
+
 > - 서버를 먼저 실행한 뒤 각 클라이언트 PC에서 실행
+> - 모든 체크를 통과하면 더미 데이터 생성 → 테스트 학습이 자동 진행됩니다
 > - 테스트 성공 후 `--config`를 `base.yaml`로, `--data-dir`을 실제 경로로 변경하면 됩니다
 
-### Step 3. 클라이언트 준비 상태 확인
-
-학습 전에 각 클라이언트 PC의 **의존성, GPU, 데이터, 서버 접속**을 한 번에 확인합니다.
-
-```bash
-# 전체 체크 (데이터 + 서버 접속)
-uv run python src/use_cases/liver_segmentation/check_ready.py \
-    --data-dir D:\data\liver_ct \
-    --server-address 192.168.1.100:443
-
-# 데이터만 확인 (서버 없이)
-uv run python src/use_cases/liver_segmentation/check_ready.py \
-    --data-dir D:\data\liver_ct
-```
-
-출력 예시:
-
-```
-[1/4] Dependencies
-  OK   torch
-  OK   monai
-  OK   flwr
-  ...
-
-[2/4] GPU
-  OK   NVIDIA GeForce RTX 3060
-  OK   VRAM: 12.0 GB
-
-[3/4] Local Data
-  OK   25 patients found, 25 valid
-
-[4/4] Server Connectivity
-  OK   TCP port 443 is open (23 ms)
-  OK   gRPC server is responding
-
-  Summary
-  [OK] Dependencies        PASS
-  [OK] GPU                 PASS
-  [OK] Local Data          PASS
-  [OK] Server              PASS
-```
-
-데이터 형식만 상세하게 검증하려면:
-
-```bash
-uv run python src/use_cases/liver_segmentation/prepare_client_data.py \
-    --data-dir D:\data\liver_ct
-```
-
-### Step 4. 서버 실행 (서버 PC)
+### Step 3. 서버 실행 (서버 PC)
 
 서버를 **먼저** 실행합니다. 서버에는 **데이터가 필요 없습니다**.
 
@@ -230,7 +194,7 @@ uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg F
   Waiting for 3 clients to connect...
 ```
 
-### Step 5. 클라이언트 실행 (각 병원 PC)
+### Step 4. 클라이언트 실행 (각 병원 PC)
 
 서버 IP를 지정하여 실행합니다. **순서 무관**, 각자 로컬 데이터를 자동 스캔합니다.
 
@@ -268,7 +232,7 @@ uv run python src/use_cases/liver_segmentation/main_client.py \
 | 환경변수 | `set FEDMORPH_DATA_DIR=D:\data\liver_ct` |
 | config YAML | `data_dir: "D:\data\liver_ct"` |
 
-### Step 6. 학습 진행
+### Step 5. 학습 진행
 
 모든 클라이언트가 접속하면 자동으로 시작됩니다.
 
