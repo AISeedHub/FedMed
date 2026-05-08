@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -101,6 +102,7 @@ def run_one_method(method, config, client_id, server_addr, out_dir, split):
         print(f"  No test data, skipping evaluation for {method}")
 
     del client
+    gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 

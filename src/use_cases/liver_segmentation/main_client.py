@@ -20,6 +20,7 @@ Usage:
 """
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -485,6 +486,7 @@ def _run_one_method_and_save(method, config, client_id, server_addr, out_dir, sp
         print("\n[Client] No test data available, skipping final evaluation.")
 
     del client
+    gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
