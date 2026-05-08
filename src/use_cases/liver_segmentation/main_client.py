@@ -334,7 +334,15 @@ class LiverSegmentationClient(FedFlowerClient):
             "dice": mean_dice,
             "hd95": float(torch.nanmean(hv).item()),
             "vr_err": float(vr_err) if not np.isnan(vr_err) else 0.0,
+            "client_id": str(self.client_id),
         }
+
+        fl_rounds = self.config.get("fl_rounds", 50)
+        if self.current_round >= fl_rounds and len(self.test_ds) > 0:
+            print(f"[Client {self.client_id}] Last round — running test evaluation...")
+            test_results = self.run_final_test()
+            metrics["test_results_json"] = json.dumps(test_results)
+
         print(
             f"[Client {self.client_id}] Eval — "
             f"Dice: {mean_dice:.4f} | "

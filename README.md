@@ -129,9 +129,7 @@ uv sync
 
 ```bash
 # 서버 (테스트 config, 4개 방법론)
-uv run python src/use_cases/liver_segmentation/main_server.py \
-    --config src/use_cases/liver_segmentation/configs/test.yaml \
-    --methods FedAvg FedProx FedBN FedMorph
+uv run python src/use_cases/liver_segmentation/main_server.py --config src/use_cases/liver_segmentation/configs/test.yaml --methods FedAvg FedProx FedBN FedMorph
 
 # 각 클라이언트 (준비 확인 → 더미 데이터 생성 → 테스트 학습, 한 줄로 실행)
 uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:443 && uv run python src/use_cases/liver_segmentation/main_client.py --config src/use_cases/liver_segmentation/configs/test.yaml --server-address 192.168.1.100:443 --data-dir tests/dummy_data --methods FedAvg FedProx FedBN FedMorph
@@ -202,15 +200,10 @@ src\run_liver_client.bat 192.168.1.100:443 D:\data\liver_ct
 
 ```bash
 # 단일 방법론 (config 기본값)
-uv run python src/use_cases/liver_segmentation/main_client.py \
-    --server-address 192.168.1.100:443 \
-    --data-dir D:\data\liver_ct
+uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir D:\data\liver_ct
 
 # 여러 방법론 순차 참여 (서버와 동일한 --methods 순서로 지정)
-uv run python src/use_cases/liver_segmentation/main_client.py \
-    --server-address 192.168.1.100:443 \
-    --data-dir D:\data\liver_ct \
-    --methods FedAvg FedProx FedBN FedMorph
+uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir D:\data\liver_ct --methods FedAvg FedProx FedBN FedMorph
 ```
 
 > `--methods`를 사용하면 데이터 split이 한 번만 수행되어 모든 방법론에서 동일하게 적용됩니다.
@@ -268,30 +261,12 @@ Metric               Global (Aggregated)   Local (Last Train)
 
 4가지 FL 방법론(FedAvg, FedProx, FedBN, FedMorph)을 순차 실행하여 비교합니다.
 
-**방법 1: main_server/client.py 사용 (권장)**
-
 ```bash
 # 서버
-uv run python src/use_cases/liver_segmentation/main_server.py \
-    --methods FedAvg FedProx FedBN FedMorph
+uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg FedProx FedBN FedMorph
 
 # 각 클라이언트
-uv run python src/use_cases/liver_segmentation/main_client.py \
-    --server-address 192.168.1.100:443 \
-    --data-dir D:\data\liver_ct \
-    --methods FedAvg FedProx FedBN FedMorph
-```
-
-**방법 2: benchmark_server/client.py 사용 (동일 기능)**
-
-```bash
-# 서버
-uv run python src/use_cases/liver_segmentation/benchmark_server.py
-
-# 각 클라이언트
-uv run python src/use_cases/liver_segmentation/benchmark_client.py \
-    --server-address 192.168.1.100:443 \
-    --data-dir D:\data\liver_ct
+uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir D:\data\liver_ct --methods FedAvg FedProx FedBN FedMorph
 ```
 
 서버가 FedAvg → FedProx → FedBN → FedMorph 순서로 FL 세션을 실행하고,
@@ -318,12 +293,10 @@ uv run python src/use_cases/liver_segmentation/benchmark_client.py \
 
 ```bash
 # 서버
-uv run python src/use_cases/liver_segmentation/benchmark_server.py --methods FedAvg FedMorph
+uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg FedMorph
 
 # 클라이언트
-uv run python src/use_cases/liver_segmentation/benchmark_client.py \
-    --server-address 192.168.1.100:443 --data-dir D:\data\liver_ct \
-    --methods FedAvg FedMorph
+uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir D:\data\liver_ct --methods FedAvg FedMorph
 ```
 
 > 결과는 `outputs/benchmark/` 폴더에 method별 모델과 JSON 결과가 저장됩니다.

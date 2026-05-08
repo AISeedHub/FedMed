@@ -5,6 +5,11 @@ FedMorph Liver Segmentation — Federated Server
 Starts the Flower gRPC server with FedMorph aggregation strategy.
 Waits for ``min_clients`` to connect, then runs ``fl_rounds`` rounds.
 
+After training, saves to server outputs/:
+  - Global model weights (.pth) per method
+  - Round-by-round metrics log (.json)
+  - Client test results collected from last round (.json)
+
 Supports running multiple methods sequentially via --methods flag:
   python main_server.py --methods FedAvg FedProx FedBN FedMorph
 
@@ -15,16 +20,19 @@ Usage:
 """
 
 import argparse
+import json
 import math
 import os
 import sys
 import time
+from collections import OrderedDict
 
 os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 
 import flwr as fl
 import torch
 import yaml
+from flwr.common import parameters_to_ndarrays
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -50,8 +58,45 @@ def get_model_state_keys(config: dict) -> list[str]:
     return keys
 
 
-def run_one_method(method, config, model_keys, server_address):
-    """Run a single FL method for fl_rounds."""
+def save_server_outputs(strategy, method, config, model_keys, out_dir):
+    """Save global model, round metrics, and client test results."""
+    os.makedirs(out_dir, exist_ok=True)
+
+    if strategy.last_parameters is not None:
+        ndarrays = parameters_to_ndarrays(strategy.last_parameters)
+        model = build_model(config, torch.device("cpu"))
+        keys = list(model.state_dict().keys())
+        state_dict = OrderedDict()
+        for k, arr in zip(keys, ndarrays):
+            state_dict[k] = torch.from_numpy(arr)
+        model.load_state_dict(state_dict)
+
+        model_path = os.path.join(out_dir, f"global_model_{method}.pth")
+        torch.save(model.state_dict(), model_path)
+        print(f"  [Server] Global model saved: {model_path}")
+        del model
+
+    if strategy.round_history:
+        history_path = os.path.join(out_dir, f"round_history_{method}.json")
+        with open(history_path, "w", encoding="utf-8") as f:
+            json.dump(strategy.round_history, f, indent=2, ensure_ascii=False)
+        print(f"  [Server] Round history saved: {history_path} "
+              f"({len(strategy.round_history)} rounds)")
+
+    if strategy.client_test_results:
+        test_path = os.path.join(out_dir, f"test_results_{method}.json")
+        with open(test_path, "w", encoding="utf-8") as f:
+            json.dump(
+                strategy.client_test_results, f, indent=2, ensure_ascii=False,
+            )
+        print(f"  [Server] Client test results saved: {test_path} "
+              f"({len(strategy.client_test_results)} clients)")
+    else:
+        print(f"  [Server] No client test results received for {method}")
+
+
+def run_one_method(method, config, model_keys, server_address, out_dir):
+    """Run a single FL method for fl_rounds. Save outputs to server."""
     fl_rounds = config["fl_rounds"]
     min_clients = config["min_clients"]
     local_epochs = config["local_epochs"]
@@ -65,18 +110,6 @@ def run_one_method(method, config, model_keys, server_address):
             "lr_scale": lr_scale,
         }
 
-    def evaluate_metrics_agg_fn(metrics: list) -> dict:
-        if not metrics:
-            return {}
-        dices = [n * m.get("dice", 0.0) for n, m in metrics]
-        examples = [n for n, _ in metrics]
-        total = sum(examples)
-        if total == 0:
-            return {}
-        avg_dice = sum(dices) / total
-        print(f"  [Server] Aggregated eval — Dice: {avg_dice:.4f}")
-        return {"dice": avg_dice}
-
     strategy = FedMorphStrategy(
         model_state_keys=model_keys,
         num_classes=config["num_classes"],
@@ -87,7 +120,6 @@ def run_one_method(method, config, model_keys, server_address):
         min_evaluate_clients=min_clients,
         min_available_clients=min_clients,
         on_fit_config_fn=fit_config_fn,
-        evaluate_metrics_aggregation_fn=evaluate_metrics_agg_fn,
     )
 
     fl.server.start_server(
@@ -95,6 +127,8 @@ def run_one_method(method, config, model_keys, server_address):
         config=fl.server.ServerConfig(num_rounds=fl_rounds),
         strategy=strategy,
     )
+
+    save_server_outputs(strategy, method, config, model_keys, out_dir)
 
 
 def main():
@@ -124,6 +158,8 @@ def main():
 
     total = len(methods)
 
+    out_dir = os.path.join(config.get("output_dir", "outputs"), "server")
+
     print("=" * 60)
     print("  FedMorph - Liver Segmentation Server")
     print("=" * 60)
@@ -135,6 +171,7 @@ def main():
           f"(filters={config['init_filters']})")
     print(f"  Param tensors: {len(model_keys)}")
     print(f"  Address:     {server_address}")
+    print(f"  Output:      {out_dir}")
     print("=" * 60)
 
     for i, method in enumerate(methods, 1):
@@ -144,7 +181,7 @@ def main():
         print(f"  Waiting for {config['min_clients']} clients to connect...")
 
         t0 = time.time()
-        run_one_method(method, config, model_keys, server_address)
+        run_one_method(method, config, model_keys, server_address, out_dir)
         elapsed = time.time() - t0
 
         print(f"\n  [{i}/{total}] {method} completed in {elapsed:.0f}s")
@@ -161,6 +198,7 @@ def main():
         print(f"  Methods tested: {', '.join(methods)}")
     else:
         print(f"  {methods[0]} complete!")
+    print(f"  Server outputs: {out_dir}")
     print("=" * 60)
 
 

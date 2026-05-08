@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from flwr.common import (
+    EvaluateRes,
     FitRes,
     Parameters,
     Scalar,
@@ -43,6 +44,11 @@ class FedMorphStrategy(FedAvg):
       FedProx  – same aggregation as FedAvg (proximal term is client-side)
       FedBN    – weighted average with local GroupNorm
       FedMorph – seg_head quality-weighted, rest FedAvg
+
+    After training, the following attributes are available:
+      last_parameters   – final aggregated Parameters
+      round_history     – per-round {round, avg_dice, clients: [...]}
+      client_test_results – {client_id: {global: {...}, local: {...}}}
     """
 
     def __init__(
@@ -57,6 +63,10 @@ class FedMorphStrategy(FedAvg):
         self.num_classes = num_classes
         self.method = method
 
+        self.last_parameters: Optional[Parameters] = None
+        self.round_history: List[dict] = []
+        self.client_test_results: Dict[str, dict] = {}
+
     # ------------------------------------------------------------------
     # aggregate_fit: core aggregation logic
     # ------------------------------------------------------------------
@@ -70,7 +80,12 @@ class FedMorphStrategy(FedAvg):
             return None, {}
 
         if self.method in ("FedAvg", "FedProx"):
-            return super().aggregate_fit(server_round, results, failures)
+            params, metrics = super().aggregate_fit(
+                server_round, results, failures,
+            )
+            if params is not None:
+                self.last_parameters = params
+            return params, metrics
 
         client_params: List[List[np.ndarray]] = []
         client_weights: List[int] = []
@@ -113,6 +128,7 @@ class FedMorphStrategy(FedAvg):
                 aggregated.append(merged.astype(tensors[0].dtype))
 
         parameters = ndarrays_to_parameters(aggregated)
+        self.last_parameters = parameters
 
         agg_metrics: Dict[str, Scalar] = {"server_round": server_round}
         if client_seg_dices:
@@ -124,6 +140,59 @@ class FedMorphStrategy(FedAvg):
             f"(method={self.method})"
         )
         return parameters, agg_metrics
+
+    # ------------------------------------------------------------------
+    # aggregate_evaluate: collect per-round metrics + test results
+    # ------------------------------------------------------------------
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: List[Tuple[ClientProxy, EvaluateRes]],
+        failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
+    ) -> Tuple[Optional[float], Dict[str, Scalar]]:
+        if not results:
+            return None, {}
+
+        round_data: dict = {"round": server_round, "clients": []}
+        weighted_loss = 0.0
+        weighted_dice = 0.0
+        total_examples = 0
+
+        for _, eval_res in results:
+            m = eval_res.metrics
+            n_ex = eval_res.num_examples
+            total_examples += n_ex
+            weighted_loss += eval_res.loss * n_ex
+            weighted_dice += m.get("dice", 0.0) * n_ex
+
+            client_info = {
+                "num_examples": n_ex,
+                "dice": m.get("dice", 0.0),
+                "hd95": m.get("hd95", 0.0),
+                "vr_err": m.get("vr_err", 0.0),
+            }
+            if "client_id" in m:
+                client_info["client_id"] = str(m["client_id"])
+
+            round_data["clients"].append(client_info)
+
+            if "test_results_json" in m:
+                cid = str(m.get("client_id", f"client_{len(self.client_test_results)}"))
+                self.client_test_results[cid] = json.loads(
+                    str(m["test_results_json"])
+                )
+
+        if total_examples == 0:
+            return None, {}
+
+        avg_loss = weighted_loss / total_examples
+        avg_dice = weighted_dice / total_examples
+        round_data["avg_dice"] = avg_dice
+
+        self.round_history.append(round_data)
+
+        print(f"  [Server] Aggregated eval — Dice: {avg_dice:.4f}")
+        return avg_loss, {"dice": avg_dice}
 
     # ------------------------------------------------------------------
     # Per-segment quality × data-size weighted aggregation
