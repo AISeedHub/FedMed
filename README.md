@@ -124,27 +124,26 @@ uv sync
 
 ### Step 2. 더미 데이터로 사전 테스트 (선택)
 
-실제 데이터 없이 환경 설정과 서버 통신이 정상인지 미리 검증할 수 있습니다.
-더미 데이터 생성 → 준비 상태 확인 → 통신 테스트를 한 번에 실행:
+실제 데이터 없이 통신 및 전체 파이프라인이 정상인지 빠르게 검증합니다.
+테스트용 config(`configs/test.yaml`)를 사용하면 2라운드 × 2에폭으로 빠르게 끝납니다.
 
 ```bash
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:443 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir tests/dummy_data
+# 서버 (테스트 config, 4개 방법론)
+uv run python src/use_cases/liver_segmentation/main_server.py \
+    --config src/use_cases/liver_segmentation/configs/test.yaml \
+    --methods FedAvg FedProx FedBN FedMorph
+
+# 각 클라이언트 (더미 데이터 생성 → 테스트 학습)
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && \
+uv run python src/use_cases/liver_segmentation/main_client.py \
+    --config src/use_cases/liver_segmentation/configs/test.yaml \
+    --server-address 192.168.1.100:443 \
+    --data-dir tests/dummy_data \
+    --methods FedAvg FedProx FedBN FedMorph
 ```
 
-> - 더미 환자 10명 생성 → 의존성/GPU/데이터/서버 접속 확인 → 서버에 접속하여 통신 테스트
-> - 서버가 먼저 실행 중이어야 합니다 (Step 4 참고)
-> - 각 단계가 실패하면 이후 단계는 실행되지 않습니다
-> - 테스트 성공 후 `--data-dir`만 실제 데이터 경로로 변경하면 됩니다
-
-더미 데이터로 4개 방법론 전부 비교 테스트하려면:
-
-```bash
-# 서버
-uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg FedProx FedBN FedMorph
-
-# 각 클라이언트
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir tests/dummy_data --methods FedAvg FedProx FedBN FedMorph
-```
+> - 서버를 먼저 실행한 뒤 각 클라이언트 PC에서 실행
+> - 테스트 성공 후 `--config`를 `base.yaml`로, `--data-dir`을 실제 경로로 변경하면 됩니다
 
 ### Step 3. 클라이언트 준비 상태 확인
 
