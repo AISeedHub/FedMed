@@ -114,7 +114,7 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-    server_address = config.get("server_address", "0.0.0.0:9000")
+    server_address = config.get("server_address", "0.0.0.0:443")
     model_keys = get_model_state_keys(config)
 
     if args.methods:

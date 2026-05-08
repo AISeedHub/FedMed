@@ -128,7 +128,7 @@ uv sync
 더미 데이터 생성 → 준비 상태 확인 → 통신 테스트를 한 번에 실행:
 
 ```bash
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:9000 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/check_ready.py --data-dir tests/dummy_data --server-address 192.168.1.100:443 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir tests/dummy_data
 ```
 
 > - 더미 환자 10명 생성 → 의존성/GPU/데이터/서버 접속 확인 → 서버에 접속하여 통신 테스트
@@ -143,7 +143,7 @@ uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patien
 uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg FedProx FedBN FedMorph
 
 # 각 클라이언트
-uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:9000 --data-dir tests/dummy_data --methods FedAvg FedProx FedBN FedMorph
+uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patients 10 && uv run python src/use_cases/liver_segmentation/main_client.py --server-address 192.168.1.100:443 --data-dir tests/dummy_data --methods FedAvg FedProx FedBN FedMorph
 ```
 
 ### Step 3. 클라이언트 준비 상태 확인
@@ -154,7 +154,7 @@ uv run python tests/generate_dummy_data.py --out-dir tests/dummy_data --n-patien
 # 전체 체크 (데이터 + 서버 접속)
 uv run python src/use_cases/liver_segmentation/check_ready.py \
     --data-dir D:\data\liver_ct \
-    --server-address 192.168.1.100:9000
+    --server-address 192.168.1.100:443
 
 # 데이터만 확인 (서버 없이)
 uv run python src/use_cases/liver_segmentation/check_ready.py \
@@ -178,7 +178,7 @@ uv run python src/use_cases/liver_segmentation/check_ready.py \
   OK   25 patients found, 25 valid
 
 [4/4] Server Connectivity
-  OK   TCP port 9000 is open (23 ms)
+  OK   TCP port 443 is open (23 ms)
   OK   gRPC server is responding
 
   Summary
@@ -237,10 +237,10 @@ uv run python src/use_cases/liver_segmentation/main_server.py --methods FedAvg F
 
 ```bash
 # Windows
-src\run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct
+src\run_liver_client.bat 192.168.1.100:443 D:\data\liver_ct
 
 # Linux
-./src/run_liver_client.sh 192.168.1.100:9000 /data/liver_ct
+./src/run_liver_client.sh 192.168.1.100:443 /data/liver_ct
 ```
 
 또는 직접:
@@ -248,12 +248,12 @@ src\run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct
 ```bash
 # 단일 방법론 (config 기본값)
 uv run python src/use_cases/liver_segmentation/main_client.py \
-    --server-address 192.168.1.100:9000 \
+    --server-address 192.168.1.100:443 \
     --data-dir D:\data\liver_ct
 
 # 여러 방법론 순차 참여 (서버와 동일한 --methods 순서로 지정)
 uv run python src/use_cases/liver_segmentation/main_client.py \
-    --server-address 192.168.1.100:9000 \
+    --server-address 192.168.1.100:443 \
     --data-dir D:\data\liver_ct \
     --methods FedAvg FedProx FedBN FedMorph
 ```
@@ -322,7 +322,7 @@ uv run python src/use_cases/liver_segmentation/main_server.py \
 
 # 각 클라이언트
 uv run python src/use_cases/liver_segmentation/main_client.py \
-    --server-address 192.168.1.100:9000 \
+    --server-address 192.168.1.100:443 \
     --data-dir D:\data\liver_ct \
     --methods FedAvg FedProx FedBN FedMorph
 ```
@@ -335,7 +335,7 @@ uv run python src/use_cases/liver_segmentation/benchmark_server.py
 
 # 각 클라이언트
 uv run python src/use_cases/liver_segmentation/benchmark_client.py \
-    --server-address 192.168.1.100:9000 \
+    --server-address 192.168.1.100:443 \
     --data-dir D:\data\liver_ct
 ```
 
@@ -367,7 +367,7 @@ uv run python src/use_cases/liver_segmentation/benchmark_server.py --methods Fed
 
 # 클라이언트
 uv run python src/use_cases/liver_segmentation/benchmark_client.py \
-    --server-address 192.168.1.100:9000 --data-dir D:\data\liver_ct \
+    --server-address 192.168.1.100:443 --data-dir D:\data\liver_ct \
     --methods FedAvg FedMorph
 ```
 
@@ -385,15 +385,15 @@ uv run python src/use_cases/liver_segmentation/benchmark_client.py \
 │    → "Waiting for 3 clients..." 대기                        │
 │                                                             │
 │  병원 A PC (자체 데이터: D:\data\liver_ct)                   │
-│    run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct │
+│    run_liver_client.bat 192.168.1.100:443 D:\data\liver_ct │
 │    → 자동 스캔: 25명 → train 17 / val 4 / test 4            │
 │                                                             │
 │  병원 B PC (자체 데이터: E:\ct_data)                         │
-│    run_liver_client.bat 192.168.1.100:9000 E:\ct_data       │
+│    run_liver_client.bat 192.168.1.100:443 E:\ct_data       │
 │    → 자동 스캔: 30명 → train 21 / val 5 / test 4            │
 │                                                             │
 │  병원 C PC (자체 데이터: C:\medical\liver)                   │
-│    run_liver_client.bat 192.168.1.100:9000 C:\medical\liver │
+│    run_liver_client.bat 192.168.1.100:443 C:\medical\liver │
 │    → 자동 스캔: 18명 → train 12 / val 3 / test 3            │
 │                                                             │
 │  → 3개 접속 완료 → 50 rounds 자동 학습 시작                  │
@@ -409,13 +409,13 @@ uv run python src/use_cases/liver_segmentation/benchmark_client.py \
 | 항목 | 서버 PC | 클라이언트 PC |
 |------|---------|--------------|
 | 고정 IP | **필요** (또는 DDNS) | 불필요 |
-| 포트 개방 | **9000번 인바운드** | 불필요 |
+| 포트 개방 | **443번 인바운드** | 불필요 |
 | 데이터 | 없음 | 자체 로컬 데이터만 |
 
 **Windows 방화벽 포트 개방 (서버 PC만):**
 
 ```powershell
-netsh advfirewall firewall add rule name="FedMorph Server" dir=in action=allow protocol=TCP localport=9000
+netsh advfirewall firewall add rule name="FedMorph Server" dir=in action=allow protocol=TCP localport=443
 ```
 
 ---

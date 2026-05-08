@@ -7,8 +7,8 @@
 #    ./run_liver_client.sh SERVER_ADDRESS [DATA_DIR]
 #
 #  Examples:
-#    ./run_liver_client.sh 192.168.1.100:9000
-#    ./run_liver_client.sh 192.168.1.100:9000 /data/hospital_a/ct
+#    ./run_liver_client.sh 192.168.1.100:443
+#    ./run_liver_client.sh 192.168.1.100:443 /data/hospital_a/ct
 # ══════════════════════════════════════════════════════════════
 
 USE_CASE="liver_segmentation"
@@ -17,7 +17,7 @@ if [ $# -eq 0 ]; then
     echo ""
     echo "  Usage: run_liver_client.sh SERVER_ADDRESS [DATA_DIR]"
     echo ""
-    echo "  SERVER_ADDRESS : e.g. 192.168.1.100:9000"
+    echo "  SERVER_ADDRESS : e.g. 192.168.1.100:443"
     echo "  DATA_DIR       : e.g. /data/liver_ct  (optional, overrides config)"
     echo ""
     exit 1

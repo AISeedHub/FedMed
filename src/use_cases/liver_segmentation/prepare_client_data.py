@@ -139,7 +139,7 @@ def main():
 
     uv run python src/use_cases/liver_segmentation/main_client.py \\
         --data-dir {os.path.abspath(args.data_dir)} \\
-        --server-address <SERVER_IP>:9000
+        --server-address <SERVER_IP>:443
 """)
 
 

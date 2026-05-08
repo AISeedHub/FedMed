@@ -8,11 +8,11 @@ FL 통신 테스트 — 외부 서버에 더미 데이터 클라이언트 접속
 이 테스트가 통과하면 실제 배포 환경에서도 작동합니다.
 
 Usage:
-  # 서버(168.131.153.47:9000)에 클라이언트 3개 접속 테스트
-  uv run python tests/test_fl_communication.py --server-address 168.131.153.47:9000 --num-clients 3
+  # 서버(168.131.153.47:443)에 클라이언트 3개 접속 테스트
+  uv run python tests/test_fl_communication.py --server-address 168.131.153.47:443 --num-clients 3
 
   # 클라이언트 수 변경 (서버 min_clients에 맞춰야 함)
-  uv run python tests/test_fl_communication.py --server-address 168.131.153.47:9000 --num-clients 2
+  uv run python tests/test_fl_communication.py --server-address 168.131.153.47:443 --num-clients 2
 
 사전 조건:
   1. 서버가 이미 실행 중이어야 함 (Windows: run_liver_server.bat)
@@ -73,7 +73,7 @@ def main():
     )
     parser.add_argument(
         "--server-address", type=str, required=True,
-        help="실행 중인 서버 주소 (예: 168.131.153.47:9000)",
+        help="실행 중인 서버 주소 (예: 168.131.153.47:443)",
     )
     parser.add_argument(
         "--num-clients", type=int, default=3,

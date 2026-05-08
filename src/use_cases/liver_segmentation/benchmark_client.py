@@ -9,10 +9,10 @@ After all methods complete, prints a comparison table of test results.
 
 Usage:
   uv run python src/use_cases/liver_segmentation/benchmark_client.py \
-      --server-address 192.168.1.100:9000 --data-dir D:\\data\\liver_ct
+      --server-address 192.168.1.100:443 --data-dir D:\\data\\liver_ct
 
   uv run python src/use_cases/liver_segmentation/benchmark_client.py \
-      --server-address 192.168.1.100:9000 --data-dir tests/dummy_data \
+      --server-address 192.168.1.100:443 --data-dir tests/dummy_data \
       --methods FedAvg FedMorph
 """
 
@@ -50,8 +50,12 @@ from src.use_cases.liver_segmentation.utils.dataset import (
 ALL_METHODS = ["FedAvg", "FedProx", "FedBN", "FedMorph"]
 
 
-def _connect_with_retry(server_addr, client, max_retries=12, interval=10):
-    """Try connecting to the FL server with retries (handles server restart gap)."""
+def _connect_with_retry(server_addr, client, max_retries=60, interval=15):
+    """Try connecting to the FL server with retries (handles server restart gap).
+
+    Default: 60 retries × 15s = up to 15 minutes wait.
+    Windows may need extra time due to TCP TIME_WAIT on port reuse.
+    """
     import grpc
 
     for attempt in range(1, max_retries + 1):

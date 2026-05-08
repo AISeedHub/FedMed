@@ -51,7 +51,7 @@ class FedFlowerServer:
         }
         return config
 
-    def start(self, server_address: str = "0.0.0.0:9000"):
+    def start(self, server_address: str = "0.0.0.0:443"):
         """Start the Federated Learning server."""
         print(f"🌸 Starting FedFlower Server on {server_address}")
         print(f"📊 Rounds: {self.num_rounds} | Min Clients: {self.min_clients}")

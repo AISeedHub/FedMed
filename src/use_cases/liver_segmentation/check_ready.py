@@ -14,7 +14,7 @@ Checks:
 Usage:
   uv run python src/use_cases/liver_segmentation/check_ready.py \
       --data-dir D:\data\liver_ct \
-      --server-address 192.168.1.100:9000
+      --server-address 192.168.1.100:443
 
   # data check only (no server)
   uv run python src/use_cases/liver_segmentation/check_ready.py \
@@ -215,7 +215,7 @@ def main():
         help="Local CT data directory")
     parser.add_argument(
         "--server-address", type=str, default=None,
-        help="Server address (e.g. 192.168.1.100:9000)")
+        help="Server address (e.g. 192.168.1.100:443)")
     args = parser.parse_args()
 
     print("=" * 60)

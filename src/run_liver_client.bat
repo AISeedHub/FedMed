@@ -7,8 +7,8 @@ rem  Usage:
 rem    run_liver_client.bat SERVER_ADDRESS [DATA_DIR]
 rem
 rem  Examples:
-rem    run_liver_client.bat 192.168.1.100:9000
-rem    run_liver_client.bat 192.168.1.100:9000 D:\data\liver_ct
+rem    run_liver_client.bat 192.168.1.100:443
+rem    run_liver_client.bat 192.168.1.100:443 D:\data\liver_ct
 rem ══════════════════════════════════════════════════════════
 
 set USE_CASE=liver_segmentation
@@ -17,7 +17,7 @@ if "%1"=="" (
     echo.
     echo  Usage: run_liver_client.bat SERVER_ADDRESS [DATA_DIR]
     echo.
-    echo  SERVER_ADDRESS : e.g. 192.168.1.100:9000
+    echo  SERVER_ADDRESS : e.g. 192.168.1.100:443
     echo  DATA_DIR       : e.g. D:\data\liver_ct  (optional, overrides config)
     echo.
     pause

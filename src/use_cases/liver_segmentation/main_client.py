@@ -10,13 +10,13 @@ The client:
   4. Returns updated model weights + seg quality metrics to server
 
 Supports running multiple methods sequentially via --methods flag:
-  python main_client.py --server-address IP:9000 --data-dir ./data --methods FedAvg FedProx FedBN FedMorph
+  python main_client.py --server-address IP:443 --data-dir ./data --methods FedAvg FedProx FedBN FedMorph
 
 No central data distribution needed — each site only accesses its own data.
 
 Usage:
-  python main_client.py --data-dir D:\\data\\liver_ct --server-address 192.168.1.100:9000
-  python main_client.py --server-address 192.168.1.100:9000 --data-dir ./data --methods FedAvg FedMorph
+  python main_client.py --data-dir D:\\data\\liver_ct --server-address 192.168.1.100:443
+  python main_client.py --server-address 192.168.1.100:443 --data-dir ./data --methods FedAvg FedMorph
 """
 
 import argparse
@@ -425,8 +425,12 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def _connect_with_retry(server_addr, client, max_retries=12, interval=10):
-    """Try connecting to the FL server with retries (handles server restart gap)."""
+def _connect_with_retry(server_addr, client, max_retries=60, interval=15):
+    """Try connecting to the FL server with retries (handles server restart gap).
+
+    Default: 60 retries × 15s = up to 15 minutes wait.
+    Windows may need extra time due to TCP TIME_WAIT on port reuse.
+    """
     import grpc
 
     for attempt in range(1, max_retries + 1):
