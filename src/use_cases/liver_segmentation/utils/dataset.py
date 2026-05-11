@@ -62,7 +62,13 @@ def resize_volume(vol: np.ndarray, size: int, is_gt: bool = False) -> np.ndarray
 
 
 class LiverSeg9Dataset(Dataset):
-    """9-segment liver CT volume dataset."""
+    """Multi-segment liver CT volume dataset.
+
+    Automatically adapts to the actual number of mask channels.
+    If mask has fewer channels than ``num_classes + 1`` (background + segments),
+    missing channels are zero-padded. The effective class count is stored in
+    ``self.num_classes``.
+    """
 
     def __init__(
         self,
@@ -86,25 +92,47 @@ class LiverSeg9Dataset(Dataset):
             if not os.path.exists(img_path):
                 continue
             mask = np.load(mask_path)
-            seg9 = mask[1 : num_classes + 1]
-            active = [c for c in range(num_classes) if seg9[c].sum() > 0]
+            available = mask.shape[0] - 1
+            nc = min(num_classes, available)
+            seg = mask[1 : 1 + nc]
+            active = [c for c in range(nc) if seg[c].sum() > 0]
             self.samples.append(
                 {
                     "img_path": img_path,
                     "mask_path": mask_path,
                     "pid": pid,
                     "active_classes": active,
+                    "mask_channels": available,
                 }
             )
+
+        if self.samples:
+            min_ch = min(s["mask_channels"] for s in self.samples)
+            if min_ch < num_classes:
+                print(
+                    f"  [Dataset] mask channels ({min_ch}+1) < "
+                    f"num_classes ({num_classes}), adapting to {min_ch}"
+                )
+                self.num_classes = min_ch
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int) -> dict:
         s = self.samples[idx]
+        nc = self.num_classes
         img = np.load(s["img_path"]).astype(np.float32)
         mask_all = np.load(s["mask_path"])
-        seg = mask_all[1 : self.num_classes + 1].astype(np.uint8)
+
+        available = mask_all.shape[0] - 1
+        take = min(nc, available)
+        seg = mask_all[1 : 1 + take].astype(np.uint8)
+        if take < nc:
+            pad_ch = nc - take
+            seg = np.pad(
+                seg, ((0, pad_ch),) + ((0, 0),) * (seg.ndim - 1),
+                mode="constant",
+            )
 
         D = img.shape[0]
         vd = self.volume_depth
@@ -130,7 +158,7 @@ class LiverSeg9Dataset(Dataset):
         seg_r = np.stack(
             [
                 resize_volume(seg[c], self.image_size, is_gt=True)
-                for c in range(self.num_classes)
+                for c in range(nc)
             ],
             axis=0,
         )

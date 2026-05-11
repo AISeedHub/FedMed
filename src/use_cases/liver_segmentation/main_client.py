@@ -78,10 +78,7 @@ class LiverSegmentationClient(FedFlowerClient):
             "cuda" if torch.cuda.is_available() else "cpu"
         )
 
-        # ── Model ──
-        self.model = build_model(config, self.device)
-
-        # ── Data ──
+        # ── Data (load first to detect actual num_classes) ──
         data_dir = config["data_dir"]
         if split is not None:
             train_ids, val_ids, test_ids = split
@@ -105,6 +102,7 @@ class LiverSegmentationClient(FedFlowerClient):
             config["image_size"], config["volume_depth"],
             mode="train", num_classes=nc,
         )
+        nc = self.train_ds.num_classes
         self.val_ds = LiverSeg9Dataset(
             data_dir, val_ids,
             config["image_size"], config["volume_depth"],
@@ -115,6 +113,16 @@ class LiverSegmentationClient(FedFlowerClient):
             config["image_size"], config["volume_depth"],
             mode="val", num_classes=nc,
         )
+
+        if nc != config["num_classes"]:
+            print(
+                f"[Client {client_id}] num_classes adapted: "
+                f"{config['num_classes']} → {nc} (based on mask channels)"
+            )
+            config["num_classes"] = nc
+
+        # ── Model (built after num_classes is confirmed) ──
+        self.model = build_model(config, self.device)
 
         nw = config.get("num_workers", 0)
         pin = torch.cuda.is_available()
@@ -153,6 +161,7 @@ class LiverSegmentationClient(FedFlowerClient):
             f"(train {len(self.train_ds)}, val {len(self.val_ds)}, "
             f"test {len(self.test_ds)})"
         )
+        print(f"[Client {client_id}] Classes: {nc}")
 
     # ------------------------------------------------------------------
     # Flower interface

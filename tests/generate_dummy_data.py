@@ -27,8 +27,9 @@ def make_sphere_mask(shape, center, radius):
     return (dist <= radius).astype(np.uint8)
 
 
-def generate_patient(out_dir: str, pid: str, depth=80, height=128, width=128):
-    """Generate one patient with synthetic CT volume and 9-segment mask."""
+def generate_patient(out_dir: str, pid: str, depth=80, height=128, width=128,
+                     num_segments=9):
+    """Generate one patient with synthetic CT volume and multi-segment mask."""
     patient_dir = os.path.join(out_dir, pid)
     os.makedirs(patient_dir, exist_ok=True)
 
@@ -37,23 +38,17 @@ def generate_patient(out_dir: str, pid: str, depth=80, height=128, width=128):
     image = rng.normal(loc=120, scale=40, size=(depth, height, width)).clip(0, 255)
     image = image.astype(np.float32)
 
-    num_segments = 9
-    num_channels = num_segments + 1  # background + 9 segments
+    num_channels = num_segments + 1
     mask = np.zeros((num_channels, depth, height, width), dtype=np.uint8)
 
-    centers_h = [height * 0.3, height * 0.7, height * 0.5,
-                 height * 0.3, height * 0.7, height * 0.3,
-                 height * 0.7, height * 0.5, height * 0.5]
-    centers_w = [width * 0.3, width * 0.3, width * 0.5,
-                 width * 0.7, width * 0.7, width * 0.5,
-                 width * 0.5, width * 0.3, width * 0.7]
-    centers_d = [depth * (0.2 + 0.06 * i) for i in range(num_segments)]
-
+    fracs = np.linspace(0.25, 0.75, num_segments)
     for seg_idx in range(num_segments):
+        frac = fracs[seg_idx]
         center = (
-            int(centers_d[seg_idx] + rng.integers(-3, 4)),
-            int(centers_h[seg_idx] + rng.integers(-5, 6)),
-            int(centers_w[seg_idx] + rng.integers(-5, 6)),
+            int(depth * (0.2 + 0.6 * seg_idx / max(num_segments - 1, 1))
+                + rng.integers(-3, 4)),
+            int(height * frac + rng.integers(-5, 6)),
+            int(width * (1 - frac) + rng.integers(-5, 6)),
         )
         radius = int(min(depth, height, width) * 0.08 + rng.integers(0, 5))
         sphere = make_sphere_mask((depth, height, width), center, radius)
@@ -78,16 +73,20 @@ def main():
         help="Output directory (default: tests/dummy_data/)",
     )
     parser.add_argument("--n-patients", type=int, default=6)
+    parser.add_argument("--num-segments", type=int, default=9,
+                        help="Number of segmentation classes (default: 9)")
     parser.add_argument("--depth", type=int, default=80)
     parser.add_argument("--height", type=int, default=128)
     parser.add_argument("--width", type=int, default=128)
     args = parser.parse_args()
 
-    print(f"Generating {args.n_patients} dummy patients in {args.out_dir}")
+    print(f"Generating {args.n_patients} dummy patients "
+          f"({args.num_segments} segments) in {args.out_dir}")
     for i in range(args.n_patients):
         pid = f"patient_{i:03d}"
         img_shape, mask_shape = generate_patient(
             args.out_dir, pid, args.depth, args.height, args.width,
+            num_segments=args.num_segments,
         )
         print(f"  {pid}: image {img_shape}, mask {mask_shape}")
 
