@@ -6,7 +6,7 @@
 
 server_address: "0.0.0.0:443"
 fl_rounds: 2
-min_clients: 3
+min_clients: 4
 local_epochs: 2
 
 method: "FedMorph"

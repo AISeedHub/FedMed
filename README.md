@@ -355,7 +355,7 @@ netsh advfirewall firewall add rule name="FedMorph Server" dir=in action=allow p
 ```yaml
 method: "FedMorph"        # FedAvg | FedProx | FedBN | FedMorph
 fl_rounds: 50
-min_clients: 3
+min_clients: 4
 local_epochs: 10
 data_dir: "./data"        # 각 PC에서 오버라이드
 ```
