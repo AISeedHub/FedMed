@@ -4,7 +4,7 @@
 # 더미 데이터로 통신 및 전체 파이프라인을 빠르게 검증하기 위한 설정.
 # 2 라운드 × 2 에폭으로 최소한의 학습만 수행합니다.
 
-server_address: "0.0.0.0:443"
+server_address: "0.0.0.0:9595"
 fl_rounds: 2
 min_clients: 4
 local_epochs: 2

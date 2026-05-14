@@ -8,10 +8,10 @@
 # Server binds to 0.0.0.0 so all network interfaces accept connections.
 # Port 443 is used to avoid hospital firewall restrictions (outbound 443 is almost always allowed).
 # Clients should connect to the server's actual IP (e.g. 192.168.1.100:443).
-server_address: "0.0.0.0:443"
-fl_rounds: 50
-min_clients: 4
-local_epochs: 10
+server_address: "0.0.0.0:9595"
+fl_rounds: 5
+min_clients: 2
+local_epochs: 5
 
 # ------------------------------------------------------------------
 # FL Method  (FedAvg | FedProx | FedBN | FedMorph)
@@ -38,7 +38,7 @@ num_workers: 0
 # ------------------------------------------------------------------
 # Model (SegResNet + MorphologicalDescriptor)
 # ------------------------------------------------------------------
-num_classes: 9             # 9 liver segments
+num_classes: 5             # 9 liver segments
 init_filters: 8
 blocks_down: [1, 2, 2, 4]
 blocks_up: [1, 1, 1]
